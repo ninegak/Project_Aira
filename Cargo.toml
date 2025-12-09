@@ -1,0 +1,13 @@
+[package]
+name = "project_aira"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+piper-rs = "0.1.9"
+ort = { version = "=2.0.0-rc.9" }
+ort-sys = { version = "=2.0.0-rc.9", default-features = false }
+anyhow = "1.0.100"
+rodio = "0.19.0"
+llama_cpp = "0.3.2"
+

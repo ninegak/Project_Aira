@@ -1,0 +1,7 @@
+/target
+
+/models
+/tts_models
+
+*.log
+**/Cargo.lock
