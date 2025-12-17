@@ -4,117 +4,39 @@ use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     terminal,
 };
-use llama_cpp::{LlamaModel, LlamaParams, SessionParams, standard_sampler::StandardSampler};
-use piper_rs::{self, synth::PiperSpeechSynthesizer};
 use rodio::{OutputStream, Sink, buffer::SamplesBuffer};
 use std::{
+    io::{self, Read, Write},
     path::Path,
     sync::{Arc, Mutex},
+    time::Duration,
 };
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-struct AiStack {
-    session: llama_cpp::LlamaSession,
-    tts: PiperSpeechSynthesizer,
-    stt: WhisperContext,
+use aira_brain::{aira::Aira, llm::LlmEngine, stt::SttEngine, tts::TtsEngine};
+
+enum InputMode {
+    Voice,
+    Text,
 }
 
-impl AiStack {
-    fn load(llm_path: &str, tts_path: &str, stt_path: &str) -> Result<Self> {
-        // Load LLaMA model
-        let llm = LlamaModel::load_from_file(
-            llm_path,
-            LlamaParams {
-                n_gpu_layers: 20,
-                ..Default::default()
-            },
-        )?;
-        let session = llm.create_session(SessionParams::default())?;
+fn choose_mode() -> InputMode {
+    println!("Choose input mode:");
+    println!("1) Voice (microphone)");
+    println!("2) Text  (CLI)");
 
-        // Load Piper TTS model
-        let model = piper_rs::from_config_path(Path::new(tts_path))?;
-        let tts = PiperSpeechSynthesizer::new(model)?;
+    print!("> ");
+    io::stdout().flush().unwrap();
 
-        // Load Whisper STT model
-        let stt = WhisperContext::new_with_params(stt_path, WhisperContextParameters::default())?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).unwrap();
 
-        Ok(Self { session, tts, stt })
-    }
-
-    fn transcribe(&self, audio: &[f32]) -> Result<String> {
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_language(Some("en"));
-        params.set_n_threads(4);
-
-        let mut state = self
-            .stt
-            .create_state()
-            .context("failed to create whisper state")?;
-        state.full(params, audio).context("whisper full() failed")?;
-
-        let mut text = String::new();
-        for segment in state.as_iter() {
-            text.push_str(segment.to_str()?);
+    match input.trim() {
+        "1" => InputMode::Voice,
+        "2" => InputMode::Text,
+        _ => {
+            println!("Invalid choice, defaulting to Text mode.");
+            InputMode::Text
         }
-
-        Ok(text)
-    }
-
-    fn ask(&mut self, user: &str) -> Result<String> {
-        let prompt = format!(
-            "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
-            user
-        );
-
-        self.session.advance_context(&prompt)?;
-
-        let mut response = String::new();
-        let completions = self
-            .session
-            .start_completing_with(StandardSampler::default(), 150)?
-            .into_strings();
-
-        for token in completions {
-            // Stop at end token or if we see another user message starting
-            if token.contains("<|im_end|>")
-                || token.contains("<|im_start|>")
-                || token.contains("User:")
-            {
-                break;
-            }
-            response.push_str(&token);
-
-            // Also stop at double newlines (end of response)
-            if response.ends_with("\n\n") {
-                break;
-            }
-        }
-
-        // Clean up the response
-        let cleaned = response
-            .trim()
-            .replace("<|im_end|>", "")
-            .replace("<|im_start|>", "")
-            .trim()
-            .to_string();
-
-        Ok(cleaned)
-    }
-
-    fn speak(&self, text: &str) -> Result<()> {
-        let chunks = self.tts.synthesize_parallel(text.to_string(), None)?;
-        let mut samples: Vec<f32> = Vec::new();
-        for c in chunks {
-            samples.extend(c?);
-        }
-
-        let (_stream, handle) = OutputStream::try_default()?;
-        let sink = Sink::try_new(&handle)?;
-        let buffer = SamplesBuffer::new(1, 22050, samples);
-        sink.append(buffer);
-        sink.sleep_until_end();
-
-        Ok(())
     }
 }
 
@@ -144,9 +66,9 @@ fn process_audio(input: &[f32], sample_rate: u32) -> Vec<f32> {
 
 fn wait_for_space() -> Result<()> {
     loop {
-        if event::poll(std::time::Duration::from_millis(10))? {
-            if let Event::Key(key) = event::read()? {
-                if key.code == KeyCode::Char(' ') && key.kind == KeyEventKind::Press {
+        if event::poll(Duration::from_millis(10))? {
+            if let Event::Key(k) = event::read()? {
+                if k.code == KeyCode::Char(' ') && k.kind == KeyEventKind::Press {
                     break;
                 }
             }
@@ -157,7 +79,7 @@ fn wait_for_space() -> Result<()> {
 
 fn wait_for_any_key() -> Result<()> {
     loop {
-        if event::poll(std::time::Duration::from_millis(10))? {
+        if event::poll(Duration::from_millis(10))? {
             if let Event::Key(_) = event::read()? {
                 break;
             }
@@ -166,33 +88,11 @@ fn wait_for_any_key() -> Result<()> {
     Ok(())
 }
 
-fn record_microphone_hold_space() -> Result<Vec<f32>> {
+fn record_microphone() -> Result<Vec<f32>> {
     let host = cpal::default_host();
-
-    //find a microphone
-    let device = host
-        .input_devices()?
-        .find(|d| {
-            if let Ok(name) = d.name() {
-                let name_lower = name.to_lowercase();
-                // Look for actual mic devices, avoid monitor/loopback devices
-                (name_lower.contains("mic") || name_lower.contains("input"))
-                    && !name_lower.contains("monitor")
-                    && !name_lower.contains("loopback")
-            } else {
-                false
-            }
-        })
-        .or_else(|| host.default_input_device())
-        .ok_or_else(|| anyhow::anyhow!("No input device found"))?;
-
-    // Show which device we're using
-    if let Ok(name) = device.name() {
-        println!("Using device: {}", name);
-    }
+    let device = host.default_input_device().context("No microphone found")?;
 
     let config = device.default_input_config()?;
-    let sample_format = config.sample_format();
     let sample_rate = config.sample_rate().0;
     let config = config.config();
 
@@ -200,101 +100,115 @@ fn record_microphone_hold_space() -> Result<Vec<f32>> {
     wait_for_space()?;
     println!("Recording... (press any key to stop)");
 
-    let recorded: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
-    let recorded_clone = recorded.clone();
-    let samples_received = Arc::new(Mutex::new(0usize));
-    let samples_received_clone = samples_received.clone();
+    let buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
+    let buffer_clone = buffer.clone();
 
-    let stream = match sample_format {
-        cpal::SampleFormat::F32 => device.build_input_stream(
-            &config,
-            move |input: &[f32], _| {
-                *samples_received_clone.lock().unwrap() += input.len();
-                recorded_clone.lock().unwrap().extend_from_slice(input);
-            },
-            |err| eprintln!("Mic error: {}", err),
-            None,
-        )?,
-        cpal::SampleFormat::I16 => device.build_input_stream(
-            &config,
-            move |input: &[i16], _| {
-                *samples_received_clone.lock().unwrap() += input.len();
-                recorded_clone
-                    .lock()
-                    .unwrap()
-                    .extend(input.iter().map(|&s| s as f32 / 32768.0));
-            },
-            |err| eprintln!("Mic error: {}", err),
-            None,
-        )?,
-        cpal::SampleFormat::U16 => device.build_input_stream(
-            &config,
-            move |input: &[u16], _| {
-                *samples_received_clone.lock().unwrap() += input.len();
-                recorded_clone
-                    .lock()
-                    .unwrap()
-                    .extend(input.iter().map(|&s| (s as f32 - 32768.0) / 32768.0));
-            },
-            |err| eprintln!("Mic error: {}", err),
-            None,
-        )?,
-        _ => panic!("Unsupported sample format: {:?}", sample_format),
-    };
+    let stream = device.build_input_stream(
+        &config,
+        move |data: &[f32], _| {
+            buffer_clone.lock().unwrap().extend_from_slice(data);
+        },
+        |err| eprintln!("Mic error: {}", err),
+        None,
+    )?;
 
     stream.play()?;
     wait_for_any_key()?;
     drop(stream);
 
-    println!("Stopped recording");
     terminal::disable_raw_mode()?;
 
-    let audio = recorded.lock().unwrap().clone();
-    Ok(process_audio(&audio, sample_rate))
+    let raw = buffer.lock().unwrap().clone();
+    Ok(process_audio(&raw, sample_rate))
 }
 
-fn main() -> Result<()> {
-    let llm_path = "models/qwen2.5-7b-instruct-q4_k_m.gguf";
-    let tts_path = "tts_models/en_US-hfc_female-medium.onnx.json";
-    let stt_path = "models/ggml-small.en-q5_1.bin";
+fn play_audio(samples: Vec<f32>) -> Result<()> {
+    let (_stream, handle) = OutputStream::try_default()?;
+    let sink = Sink::try_new(&handle)?;
+    let buffer = SamplesBuffer::new(1, 22050, samples);
+    sink.append(buffer);
+    sink.sleep_until_end();
+    Ok(())
+}
 
-    println!("Loading AI models...");
-    let mut ai = AiStack::load(llm_path, tts_path, stt_path)?;
+fn text_loop(mut aira: Aira) -> Result<()> {
+    println!("💬 Text mode. Type 'exit' to quit.\n");
 
-    ai.session.advance_context(
-        "<|im_start|>system\nYou are Aira, an empathetic AI consultant specializing in emotional support. Made by NineGeoff \
-        Listen carefully to the user's emotions and respond with understanding and care. \
-        Keep responses concise but warm.<|im_end|>\n"
-    )?;
+    loop {
+        print!("You: ");
+        std::io::stdout().flush()?;
 
-    println!("Voice AI Ready!\n");
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+
+        let text = input.trim();
+        if text.is_empty() { continue; }
+
+        if text.eq_ignore_ascii_case("exit") || text.eq_ignore_ascii_case("quit") {
+            println!("Goodbye 👋");
+            break;
+        }
+
+        let reply = aira.think(text)?;
+        println!("Aira: {}\n", reply);
+
+        let speech = aira.speak(&reply)?;
+        play_audio(speech)?;
+    }
+
+    Ok(())
+}
+
+fn voice_loop(mut aira: aira_brain::aira::Aira) -> Result<()> {
+    println!("🎤 Voice mode. Press SPACE to talk.\n");
 
     loop {
         terminal::enable_raw_mode()?;
-        let audio = record_microphone_hold_space()?;
+        let audio = record_microphone()?;
 
         println!("Transcribing...");
-        let text = ai.transcribe(&audio)?;
+        let text = aira.transcribe(&audio)?;
 
         if text.trim().is_empty() {
             println!("(No speech detected)\n");
             continue;
         }
 
-        println!("You said: {}", text);
+        println!("You: {}", text);
 
         if text.to_lowercase().contains("exit") || text.to_lowercase().contains("quit") {
-            println!("Goodbye!");
+            println!("Goodbye 👋");
             break;
         }
 
-        println!("Thinking...");
-        let reply = ai.ask(&text)?;
+        println!("Aira is thinking...");
+        let reply = aira.think(&text)?;
         println!("Aira: {}\n", reply);
 
-        ai.speak(&reply)?;
+        let speech = aira.speak(&reply)?;
+        play_audio(speech)?;
     }
-
 
     Ok(())
 }
+
+fn main() -> Result<()> {
+    println!("Loading Aira...");
+
+    let stt = SttEngine::load("models/ggml-small.en-q5_1.bin")?;
+    let llm = LlmEngine::load(
+        "models/qwen2.5-7b-instruct-q4_k_m.gguf",
+        "<|im_start|>system\nYou are Aira, a warm, empathetic AI assistant.<|im_end|>\n",
+    )?;
+    let tts = TtsEngine::load("tts_models/en_US-hfc_female-medium.onnx.json")?;
+
+    let aira = Aira::new(stt, llm, tts);
+
+    match choose_mode() {
+        InputMode::Voice => voice_loop(aira)?,
+        InputMode::Text => text_loop(aira)?,
+    }
+
+    Ok(())
+}
+
