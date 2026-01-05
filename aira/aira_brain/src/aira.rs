@@ -17,8 +17,8 @@ impl Aira {
         self.stt.transcribe(audio)
     }
 
-    pub fn think(&mut self, user_text: &str) -> Result<String> {
-        self.llm.ask(user_text)
+    pub fn think<F: FnMut(String) -> anyhow::Result<()>>(&mut self, user_text: &str, callback: F) -> Result<f64> {
+        self.llm.ask(user_text, callback)
     }
 
     pub fn speak(&self, text: &str) -> Result<Vec<f32>> {

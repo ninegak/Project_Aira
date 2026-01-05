@@ -151,11 +151,17 @@ fn text_loop(mut aira: Aira) -> Result<()> {
         }
 
         // think() will print "Aira: " and stream tokens in real-time
-        let reply = aira.think(text)?;
+        let mut print_callback = |token: String| {
+            print!("{}", token);
+            std::io::stdout().flush().context("Failed to flush stdout")
+        };
+        let _tps = aira.think(text, &mut print_callback)?;
         println!(); // Add newline after streaming
 
-        let speech = aira.speak(&reply)?;
-        play_audio(speech)?;
+        // Speaking the full reply is not compatible with streaming think.
+        // If real-time speech is desired, it would need to be integrated into the callback.
+        // let speech = aira.speak(&reply)?;
+        // play_audio(speech)?;
     }
 
     Ok(())
@@ -184,11 +190,17 @@ fn voice_loop(mut aira: aira_brain::aira::Aira) -> Result<()> {
         }
 
         // think() will print "Aira: " and stream tokens in real-time
-        let reply = aira.think(&text)?;
+        let mut print_callback = |token: String| {
+            print!("{}", token);
+            std::io::stdout().flush().context("Failed to flush stdout")
+        };
+        let _tps = aira.think(&text, &mut print_callback)?;
         println!(); // Add newline after streaming
 
-        let speech = aira.speak(&reply)?;
-        play_audio(speech)?;
+        // Speaking the full reply is not compatible with streaming think.
+        // If real-time speech is desired, it would need to be integrated into the callback.
+        // let speech = aira.speak(&reply)?;
+        // play_audio(speech)?;
     }
 
     Ok(())

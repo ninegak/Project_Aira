@@ -10,3 +10,9 @@ cpal = "0.16.0"
 crossterm = "0.27"
 
 aira_brain = { path = "aira_brain" }
+
+[workspace]
+members = [
+  "aira_brain",
+  "aira_server"
+]

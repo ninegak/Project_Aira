@@ -1,0 +1,91 @@
+ * {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.app-container {
+  display: flex;
+  height: 100vh;
+  font-family: "JetBrainsMono Nerd Font", "Symbols Nerd Font";
+  background-color: #282c34;
+  color: #c7d3dd;
+}
+
+.app-header {
+  background-color: #20232a;
+  padding: 20px;
+  border-bottom: 1px solid #61dafb;
+}
+
+.chat-window {
+  display: flex;
+  flex: 1;
+}
+
+.message {
+  padding: 10px 15px;
+  border-radius: 20px;
+  max-width: 70%;
+  align-self: flex-start;
+  word-wrap: break-word;
+  position: relative;
+}
+
+.message.user {
+  background-color: #61dafb;
+  color: #20232a;
+  align-self: flex-end;
+  border-bottom-right-radius: 2px;
+}
+
+.message.aira {
+  background-color: #444;
+  color: white;
+  align-self: flex-start;
+  border-bottom-left-radius: 2px;
+}
+
+.chat-input {
+  display: flex;
+  padding: 20px;
+  border-top: 1px solid #61dafb;
+  background-color: #20232a;
+  gap: 10px;
+}
+
+.chat-input input {
+  flex-grow: 1;
+  padding: 10px;
+  border-radius: 20px;
+  border: 1px solid #61dafb;
+  background-color: #333;
+  color: white;
+  outline: none;
+}
+
+.chat-input input:focus {
+  border-color: #a0e9fd;
+}
+
+.chat-input button {
+  background-color: #61dafb;
+  color: #20232a;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.chat-input button:hover {
+  background-color: #a0e9fd;
+}
+
+.tps-badge {
+  position: absolute;
+  bottom: 5px;
+  right: 10px;
+  font-size: 0.7em;
+  color: #aaa;
+}
