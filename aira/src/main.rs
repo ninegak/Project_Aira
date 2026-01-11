@@ -145,26 +145,26 @@ fn text_loop(mut aira: Aira) -> Result<()> {
             continue;
         }
 
-        if text.eq_ignore_ascii_case("exit") || text.eq_ignore_ascii_case("quit") {
+        if text.to_lowercase().contains("exit") || text.to_lowercase().contains("quit") {
             println!("Goodbye 👋");
-            break;
+            return Ok(());
         }
 
-        // think() will print "Aira: " and stream tokens in real-time
+        let mut full_reply_text = String::new();
         let mut print_callback = |token: String| {
             print!("{}", token);
+            full_reply_text.push_str(&token);
             std::io::stdout().flush().context("Failed to flush stdout")
         };
+        
+        println!("Aira: ");
         let _tps = aira.think(text, &mut print_callback)?;
         println!(); // Add newline after streaming
 
-        // Speaking the full reply is not compatible with streaming think.
-        // If real-time speech is desired, it would need to be integrated into the callback.
-        // let speech = aira.speak(&reply)?;
-        // play_audio(speech)?;
+        // Speaking the full reply
+        let speech = aira.speak(&full_reply_text)?;
+        play_audio(speech)?;
     }
-
-    Ok(())
 }
 
 fn voice_loop(mut aira: aira_brain::aira::Aira) -> Result<()> {
@@ -184,26 +184,21 @@ fn voice_loop(mut aira: aira_brain::aira::Aira) -> Result<()> {
 
         println!("You: {}", text);
 
-        if text.to_lowercase().contains("exit") || text.to_lowercase().contains("quit") {
-            println!("Goodbye 👋");
-            break;
-        }
-
-        // think() will print "Aira: " and stream tokens in real-time
+        let mut full_reply_text = String::new();
         let mut print_callback = |token: String| {
             print!("{}", token);
+            full_reply_text.push_str(&token);
             std::io::stdout().flush().context("Failed to flush stdout")
         };
+        
+        println!("Aira: ");
         let _tps = aira.think(&text, &mut print_callback)?;
         println!(); // Add newline after streaming
 
-        // Speaking the full reply is not compatible with streaming think.
-        // If real-time speech is desired, it would need to be integrated into the callback.
-        // let speech = aira.speak(&reply)?;
-        // play_audio(speech)?;
+        // Speaking the full reply
+        let speech = aira.speak(&full_reply_text)?;
+        play_audio(speech)?;
     }
-
-    Ok(())
 }
 
 fn main() -> Result<()> {

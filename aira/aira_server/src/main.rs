@@ -21,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
 
     let stt = SttEngine::load("/home/ninegak/Project_Aira/aira/models/ggml-small.en-q5_1.bin")?;
     let llm = LlmEngine::load(
-        "/home/ninegak/Project_Aira/aira/models/qwen2.5-7b-instruct-q4_k_m.gguf",
+        "/home/ninegak/Project_Aira/aira/models/Grok-3-reasoning-gemma3-4B-distilled-HF.Q2_K.gguf",
         "<|im_start|>system\nYou are Aira, a warm, empathetic AI assistant.<|im_end|>\n",
     )?;
     let tts = TtsEngine::load(
@@ -33,6 +33,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(api::health))
         .route("/chat", post(api::chat))
+        .route("/api/tts", post(api::tts))
         .with_state(aira)
         .layer(CorsLayer::permissive());
 
