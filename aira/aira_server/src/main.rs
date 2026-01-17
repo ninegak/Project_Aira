@@ -9,7 +9,7 @@ use std::{
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 
-use aira_brain::{aira::Aira, llm::LlmEngine, stt::SttEngine, tts::TtsEngine};
+use aira_brain::{aira::Aira, llm::LlmEngine, stt::SttEngine, tts::TtsEngine, emotion::EmotionEngine};
 
 mod api;
 mod models;
@@ -27,13 +27,15 @@ async fn main() -> anyhow::Result<()> {
     let tts = TtsEngine::load(
         "/home/ninegak/Project_Aira/aira/tts_models/en_US-hfc_female-medium.onnx.json",
     )?;
+    let emotion = EmotionEngine::new()?;
 
-    let aira = Arc::new(Mutex::new(Aira::new(stt, llm, tts)));
+    let aira = Arc::new(Mutex::new(Aira::new(stt, llm, tts, emotion)));
 
     let app = Router::new()
         .route("/health", get(api::health))
         .route("/chat", post(api::chat))
         .route("/api/tts", post(api::tts))
+        .route("/api/emotion", post(api::emotion::analyze_emotion))
         .with_state(aira)
         .layer(CorsLayer::permissive());
 

@@ -1,5 +1,6 @@
 pub mod chat;
 pub mod tts;
+pub mod emotion;
 pub use chat::chat;
 pub use tts::tts;
 

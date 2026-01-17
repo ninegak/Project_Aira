@@ -10,6 +10,12 @@ function App() {
 	const messagesEndRef = useRef(null);
 	const [audioLoading, setAudioLoading] = useState(false);
 
+	// Emotion detection states
+	const [isRecording, setIsRecording] = useState(false);
+	const [emotion, setEmotion] = useState(null);
+	const mediaRecorder = useRef(null);
+	const audioChunks = useRef([]);
+
 	const handlePlayAudio = async (text) => {
 		if (audioLoading) return;
 		setAudioLoading(true);
@@ -43,9 +49,64 @@ function App() {
 		messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 	};
 
-	-	useEffect(() => {
+	useEffect(() => {
 		scrollToBottom();
 	}, [messages]);
+
+	// Emotion detection functions
+	const startRecording = async () => {
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+			mediaRecorder.current = new MediaRecorder(stream);
+
+			mediaRecorder.current.ondataavailable = (event) => {
+				audioChunks.current.push(event.data);
+			};
+
+			mediaRecorder.current.onstop = async () => {
+				const audioBlob = new Blob(audioChunks.current, { type: 'audio/wav' });
+				sendAudioToServer(audioBlob);
+				audioChunks.current = [];
+			};
+
+			mediaRecorder.current.start();
+			setIsRecording(true);
+		} catch (error) {
+			console.error('Error accessing microphone:', error);
+			alert('Could not access microphone. Please ensure it is connected and permissions are granted.');
+		}
+	};
+
+	const stopRecording = () => {
+		if (mediaRecorder.current && isRecording) {
+			mediaRecorder.current.stop();
+			setIsRecording(false);
+		}
+	};
+
+	const sendAudioToServer = async (audioBlob) => {
+		const formData = new FormData();
+		formData.append('audio', audioBlob, 'audio.wav'); // 'audio.wav' filename for backend
+
+		try {
+			const response = await fetch('http://127.0.0.1:3000/api/emotion', {
+				method: 'POST',
+				body: formData,
+			});
+
+			if (response.ok) {
+				const data = await response.json();
+				setEmotion(data.dominant_emotion);
+				console.log('Emotion detected:', data.dominant_emotion);
+			} else {
+				console.error('Failed to analyze emotion:', response.statusText);
+				setEmotion('Error');
+			}
+		} catch (error) {
+			console.error('Error sending audio to server:', error);
+			setEmotion('Error');
+		}
+	};
 
 	const handleSendMessage = () => {
 		if (inputMessage.trim() && !loading) {
@@ -105,6 +166,7 @@ function App() {
 				<div className="col">
 					<h1>Aira Assistant</h1>
 					<p className="lead">AI-Powered Conversational Interface</p>
+					{emotion && <p className="mb-0">Detected Emotion: {emotion}</p>}
 				</div>
 			</div>
 			<div className="row flex-grow-1 overflow-auto justify-content-center">
@@ -138,7 +200,13 @@ function App() {
 							<div ref={messagesEndRef} />
 						</div>
 						<div className="mt-auto">
-							<div className="input-group">
+							<div className="input-group mb-3">
+								<button
+									className={`btn ${isRecording ? 'btn-danger' : 'btn-success'}`}
+									onClick={isRecording ? stopRecording : startRecording}
+								>
+									{isRecording ? 'Stop Emotion Analysis' : 'Start Emotion Analysis'}
+								</button>
 								<input
 									type="text"
 									className="form-control bg-dark text-light"
