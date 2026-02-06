@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import Sidebar from './components/Sidebar';
 import Chat from './components/Chat';
@@ -7,6 +7,7 @@ import './App.css';
 interface Message {
 	sender: 'user' | 'aira';
 	text: string;
+	tps?: string; // ✅ Add TPS to message
 }
 
 function App() {
@@ -14,23 +15,65 @@ function App() {
 	const [inputMessage, setInputMessage] = useState<string>('');
 	const [loading, setLoading] = useState<boolean>(false);
 	const [tps, setTps] = useState<string | null>(null);
-	const messagesEndRef = useRef<HTMLDivElement>(null);
+	const messagesEndRef = useRef<HTMLDivElement>(null!);
 	const [audioLoading, setAudioLoading] = useState<boolean>(false);
 
-	// Emotion detection states
+	const [ttsAudioQueue, setTtsAudioQueue] = useState<string[]>([]);
+	const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+
 	const [isRecording, setIsRecording] = useState<boolean>(false);
 	const [emotion, setEmotion] = useState<string | null>(null);
 	const mediaRecorder = useRef<MediaRecorder | null>(null);
 	const audioChunks = useRef<Blob[]>([]);
-	//
-	const handleSendMessage = () => {
+
+	const [darkMode, setDarkMode] = useState<boolean>(() => {
+		const saved = localStorage.getItem('darkMode');
+		return saved !== null ? JSON.parse(saved) : true;
+	});
+
+	const toggleMode = useCallback(() => {
+		setDarkMode(prev => {
+			const newMode = !prev;
+			localStorage.setItem('darkMode', JSON.stringify(newMode));
+			return newMode;
+		});
+	}, []);
+
+	const playTtsAudio = useCallback(async () => {
+		if (isPlayingAudio || ttsAudioQueue.length === 0) return;
+
+		setIsPlayingAudio(true);
+		setAudioLoading(true);
+
+		try {
+			for (const base64 of ttsAudioQueue) {
+				await new Promise<void>((resolve, reject) => {
+					const audio = new Audio('data:audio/wav;base64,' + base64);
+					audio.onended = () => resolve();
+					audio.onerror = () => reject(new Error('Audio playback failed'));
+					audio.play().catch(reject);
+				});
+			}
+		} catch (error) {
+			console.error('Error playing audio:', error);
+		} finally {
+			setTtsAudioQueue([]);
+			setIsPlayingAudio(false);
+			setAudioLoading(false);
+		}
+	}, [isPlayingAudio, ttsAudioQueue]);
+
+	const handleSendMessage = useCallback(() => {
 		if (inputMessage.trim() && !loading) {
 			const userMessage: Message = { sender: 'user', text: inputMessage };
+			const messageToSend = inputMessage;
+
 			setMessages((prevMessages) => [...prevMessages, userMessage]);
 			setInputMessage('');
 			setLoading(true);
 			setTps(null);
 
+			// ✅ Create Aira message without TPS initially
 			const airaMessage: Message = { sender: 'aira', text: '' };
 			setMessages((prevMessages) => [...prevMessages, airaMessage]);
 
@@ -39,71 +82,84 @@ function App() {
 				headers: {
 					'Content-Type': 'application/json',
 				},
-				body: JSON.stringify({ message: inputMessage }),
+				body: JSON.stringify({ message: messageToSend }),
 				onmessage(event) {
 					if (event.event === 'tps') {
-						setTps(parseFloat(event.data).toFixed(2));
+						const tpsValue = parseFloat(event.data).toFixed(2);
+						setTps(tpsValue);
+
+						// ✅ Update the last message with TPS
+						setMessages((prevMessages) => {
+							const lastMessage = prevMessages[prevMessages.length - 1];
+							const updatedLastMessage: Message = {
+								...lastMessage,
+								tps: tpsValue
+							};
+							return [...prevMessages.slice(0, -1), updatedLastMessage];
+						});
 					} else if (event.event === 'error') {
 						setMessages((prevMessages) => {
 							const lastMessage = prevMessages[prevMessages.length - 1];
 							const updatedText = lastMessage.text + `\n\nError: ${event.data}`;
-							const updatedLastMessage = { ...lastMessage, text: updatedText };
+							const updatedLastMessage: Message = { ...lastMessage, text: updatedText };
 							return [...prevMessages.slice(0, -1), updatedLastMessage];
 						});
 					} else if (event.event === 'audio_complete') {
-						const audio = new Audio('data:audio/wav;base64,' + event.data);
-						audio.play();
+						setTtsAudioQueue(prev => [...prev, event.data]);
 					} else if (event.event === 'tts_error' || event.event === 'audio_error') {
 						console.error('Error from server:', event.data);
-					}
-					else {
+					} else {
+						// ✅ Update message text
 						setMessages((prevMessages) => {
 							const lastMessage = prevMessages[prevMessages.length - 1];
-							const updatedLastMessage = { ...lastMessage, text: lastMessage.text + event.data };
+							const updatedLastMessage: Message = {
+								...lastMessage,
+								text: lastMessage.text + event.data
+							};
 							return [...prevMessages.slice(0, -1), updatedLastMessage];
 						});
 					}
 				},
-			onclose() {
-				setLoading(false);
-			},
-			onerror(err) {
-				console.error('EventSource failed:', err);
-				setMessages((prevMessages) => {
-					const lastMessage = prevMessages[prevMessages.length - 1];
-					const updatedLastMessage = { ...lastMessage, text: 'Error: Could not connect to Aira.' };
-					return [...prevMessages.slice(0, -1), updatedLastMessage];
-				});
-				setLoading(false);
-				throw err;
-			},
-		});
+				onclose() {
+					setLoading(false);
+				},
+				onerror(err) {
+					console.error('EventSource failed:', err);
+					setMessages((prevMessages) => {
+						const lastMessage = prevMessages[prevMessages.length - 1];
+						const updatedLastMessage: Message = {
+							...lastMessage,
+							text: lastMessage.text || 'Error: Could not connect to Aira.'
+						};
+						return [...prevMessages.slice(0, -1), updatedLastMessage];
+					});
+					setLoading(false);
+					throw err;
+				},
+			});
 		}
-	};
+	}, [inputMessage, loading]);
 
-	const startRecording = async () => {
+	const startRecording = useCallback(async () => {
 		try {
 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-			mediaRecorder.current = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+			mediaRecorder.current = new MediaRecorder(stream, {
+				mimeType: 'audio/webm;codecs=opus'
+			});
 			audioChunks.current = [];
 
 			mediaRecorder.current.ondataavailable = (event) => {
-				audioChunks.current.push(event.data);
+				if (event.data.size > 0) {
+					audioChunks.current.push(event.data);
+				}
 			};
 
 			mediaRecorder.current.onstop = async () => {
 				const audioBlob = new Blob(audioChunks.current, { type: 'audio/webm' });
-				// For emotion detection, we need to convert webm to wav if the backend only accepts wav.
-				// For simplicity, let's assume the backend can handle webm or we convert it before sending.
-				// Given the backend code in emotion.rs reads WavReader, a conversion will be necessary.
-				// However, MediaRecorder does not directly output WAV. This requires a client-side library
-				// or server-side conversion. For now, we will send webm and note this potential issue.
-				// A proper solution would involve a library like 'opus-media-recorder' or 'ffmpeg.wasm'.
-
 				const formData = new FormData();
-				formData.append('audio', audioBlob, 'recording.webm'); // Send as webm initially
+				formData.append('audio', audioBlob, 'recording.webm');
 
-				setAudioLoading(true); // Indicate that audio is being processed/uploaded
+				setAudioLoading(true);
 
 				try {
 					const response = await fetch('http://127.0.0.1:3000/api/emotion', {
@@ -123,6 +179,7 @@ function App() {
 					setEmotion('Error: API call failed');
 				} finally {
 					setAudioLoading(false);
+					stream.getTracks().forEach(track => track.stop());
 				}
 			};
 
@@ -132,43 +189,60 @@ function App() {
 			console.error('Error accessing microphone:', err);
 			alert('Please allow microphone access to use this feature.');
 		}
-	};
+	}, []);
 
-	const stopRecording = () => {
+	const stopRecording = useCallback(() => {
 		if (mediaRecorder.current && isRecording) {
 			mediaRecorder.current.stop();
 			setIsRecording(false);
-			// TODO: Implement client-side conversion from webm to wav if the backend strictly requires wav.
-			// Currently, the backend (emotion.rs) uses hound::WavReader, implying it expects WAV.
-			// Sending webm directly might cause a server-side error.
 		}
-	};
+	}, [isRecording]);
 
 	useEffect(() => {
 		messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 	}, [messages]);
 
+	useEffect(() => {
+		return () => {
+			if (mediaRecorder.current && mediaRecorder.current.state === 'recording') {
+				mediaRecorder.current.stop();
+			}
+		};
+	}, []);
+
 	return (
 		<div className="d-flex vh-100">
-			<Sidebar />
-			<div className="flex-grow-1">
+			<Sidebar darkMode={darkMode} />
+			<div className={`flex-grow-1 d-flex flex-column ${darkMode ? 'bg-dark' : 'bg-light'}`}>
+				<div className="p-2 text-end">
+					<button
+						className={`btn btn-sm ${darkMode ? 'btn-light' : 'btn-dark'}`}
+						onClick={toggleMode}
+						aria-label={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+					>
+						{darkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
+					</button>
+				</div>
 				<Chat
 					messages={messages}
 					inputMessage={inputMessage}
 					loading={loading}
 					tps={tps}
 					audioLoading={audioLoading}
-				isRecording={isRecording}
-				emotion={emotion}
-				handleSendMessage={handleSendMessage}
-				setInputMessage={setInputMessage}
-				startRecording={startRecording}
-				stopRecording={stopRecording}
-				messagesEndRef={messagesEndRef}
+					isRecording={isRecording}
+					emotion={emotion}
+					handleSendMessage={handleSendMessage}
+					setInputMessage={setInputMessage}
+					startRecording={startRecording}
+					stopRecording={stopRecording}
+					messagesEndRef={messagesEndRef}
+					onPlayAudio={playTtsAudio}
+					darkMode={darkMode}
+					hasAudio={ttsAudioQueue.length > 0}
 				/>
 			</div>
 		</div>
-	)
+	);
 }
 
 export default App;

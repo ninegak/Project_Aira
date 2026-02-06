@@ -3,4 +3,4 @@ pub mod stt;
 pub mod llm;
 pub mod tts;
 pub mod config;
-pub mod emotion;
+
