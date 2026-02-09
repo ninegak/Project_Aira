@@ -7,10 +7,7 @@ pub struct SttEngine {
 
 impl SttEngine {
     pub fn load(model_path: &str) -> Result<Self> {
-        let ctx = WhisperContext::new_with_params(
-            model_path,
-            WhisperContextParameters::default(),
-        )?;
+        let ctx = WhisperContext::new_with_params(model_path, WhisperContextParameters::default())?;
 
         Ok(Self { ctx })
     }
@@ -35,4 +32,3 @@ impl SttEngine {
         Ok(text.trim().to_string())
     }
 }
-

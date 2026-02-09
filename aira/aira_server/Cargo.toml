@@ -18,3 +18,4 @@ axum-extra = { version = "0.12.5", features = ["multipart"] }
 async-trait = "0.1.77"
 
 aira_brain = { path = "../aira_brain" }
+bytes = "1.11.1"

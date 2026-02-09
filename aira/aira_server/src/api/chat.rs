@@ -8,129 +8,126 @@ use axum::{
         sse::{Event, Sse},
     },
 };
-use base64::{Engine as _, engine::general_purpose};
+use bytes::Bytes;
 use std::convert::Infallible;
-use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
-fn float_to_i16(samples: &[f32]) -> Vec<i16> {
-    samples.iter().map(|s| (s * 32767.0) as i16).collect()
-}
-
-fn create_wav(samples: Vec<f32>, sample_rate: u32) -> anyhow::Result<Vec<u8>> {
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
-    };
-    let mut cursor = std::io::Cursor::new(Vec::new());
-    let mut writer = hound::WavWriter::new(&mut cursor, spec)?;
-    for sample in float_to_i16(&samples) {
-        writer.write_sample(sample)?;
-    }
-    writer.finalize()?;
-    Ok(cursor.into_inner())
-}
-
+/// High-performance chat endpoint with optimized streaming
 pub async fn chat(
     State(aira_state): State<SharedAira>,
     Json(req): Json<ChatRequest>,
 ) -> impl IntoResponse {
-    let (tx, rx) = mpsc::channel::<Event>(256);
-    let (tts_tx, mut tts_rx) = mpsc::channel::<String>(16);
+    // Use larger channel to reduce backpressure
+    let (event_tx, event_rx) = mpsc::channel::<Result<Event, Infallible>>(512);
 
-    let tx_clone = tx.clone();
-    let aira_state_clone = aira_state.clone();
-
-    // --- Background TTS worker ---
     tokio::spawn(async move {
-        while let Some(chunk) = tts_rx.recv().await {
-            let tx_tts = tx_clone.clone();
-            let aira_state_tts = aira_state_clone.clone();
+        // Clone TTS engine ONCE outside the lock for concurrent use
+        let tts_engine = {
+            let guard = aira_state.lock().unwrap();
+            guard.get_tts()
+        };
 
-            tokio::task::spawn_blocking(move || {
-                if let Ok(samples) = aira_state_tts.lock().unwrap().speak(&chunk) {
-                    if let Ok(wav) = create_wav(samples, 22050) {
-                        let b64 = general_purpose::STANDARD.encode(&wav);
-                        let _ = tokio::spawn(async move {
-                            let _ = tx_tts
-                                .send(Event::default().event("audio_complete").data(b64))
-                                .await;
-                        });
+        // TTS worker channel
+        let (tts_tx, mut tts_rx) = mpsc::channel::<String>(32);
+
+        // Spawn TTS worker that processes chunks concurrently
+        let event_tx_tts = event_tx.clone();
+        tokio::spawn(async move {
+            while let Some(text_chunk) = tts_rx.recv().await {
+                let tts = tts_engine.clone();
+                let event_tx = event_tx_tts.clone();
+
+                // Spawn blocking task for TTS synthesis
+                tokio::task::spawn_blocking(move || {
+                    if let Ok(samples) = tts.synthesize(&text_chunk) {
+                        // Convert to WAV and encode as base64 in one go
+                        if let Ok(wav_base64) = samples_to_base64_wav(samples) {
+                            let _ = event_tx.blocking_send(Ok(Event::default()
+                                .event("audio_complete")
+                                .data(wav_base64)));
+                        }
                     }
-                }
-            });
-        }
-    });
-
-    // --- LLM streaming ---
-    let tx_llm = tx.clone();
-    let tts_tx_llm = tts_tx.clone();
-    let aira_state_llm = aira_state.clone();
-
-    tokio::spawn(async move {
-        tokio::task::spawn_blocking(move || {
-            // ✅ Use Arc<Mutex<String>> for thread-safe buffer sharing
-            let buffer = Arc::new(Mutex::new(String::new()));
-            let buffer_clone = buffer.clone();
-
-            let mut guard = aira_state_llm.lock().unwrap();
-
-            // ✅ CAPTURE the TPS result
-            let result = guard.think(&req.message, |token: String| {
-                let tx_llm = tx_llm.clone();
-                let tts_tx_llm = tts_tx_llm.clone();
-                let buffer = buffer_clone.clone();
-
-                // ✅ Clone token BEFORE moving it
-                let token_for_buffer = token.clone();
-
-                // send token immediately (moves token)
-                let _ = tokio::spawn(async move {
-                    let _ = tx_llm.send(Event::default().data(token)).await;
                 });
+            }
+        });
 
-                // ✅ Use the cloned token for buffer operations
-                let mut buf = buffer.lock().unwrap();
-                buf.push_str(&token_for_buffer);
+        // LLM inference in blocking thread
+        let event_tx_llm = event_tx.clone();
+        let message = req.message.clone();
 
-                // send chunk to TTS if end of sentence or buffer too long
-                if buf.ends_with('.') || buf.ends_with('?') || buf.ends_with('!') || buf.len() > 100
-                {
-                    let chunk = buf.drain(..).collect::<String>();
-                    drop(buf); // Release lock before blocking send
-                    let _ = tts_tx_llm.blocking_send(chunk);
-                } else {
-                    drop(buf); // Release lock
-                }
+        tokio::task::spawn_blocking(move || {
+            // Sentence buffer for TTS (no Arc<Mutex>, just local)
+            let mut sentence_buffer = String::with_capacity(128);
 
-                Ok::<_, anyhow::Error>(())
-            });
+            let tps_result = {
+                let mut guard = aira_state.lock().unwrap();
 
-            // send remaining buffer
-            {
-                let mut buf = buffer.lock().unwrap();
-                if !buf.is_empty() {
-                    let chunk = buf.drain(..).collect::<String>();
-                    drop(buf); // Release lock before blocking send
-                    let _ = tts_tx_llm.blocking_send(chunk);
-                }
+                guard.think(&message, |token: &str| {
+                    // Send token immediately (zero-copy via &str)
+                    let _ =
+                        event_tx_llm.blocking_send(Ok(Event::default().data(token.to_string())));
+
+                    // Buffer for sentence detection
+                    sentence_buffer.push_str(token);
+
+                    // Send to TTS on sentence boundaries or buffer overflow
+                    if sentence_buffer.ends_with('.')
+                        || sentence_buffer.ends_with('?')
+                        || sentence_buffer.ends_with('!')
+                        || sentence_buffer.len() > 150
+                    {
+                        if !sentence_buffer.trim().is_empty() {
+                            let _ = tts_tx.blocking_send(sentence_buffer.clone());
+                            sentence_buffer.clear();
+                        }
+                    }
+
+                    Ok::<_, anyhow::Error>(())
+                })
+            };
+
+            // Send remaining buffer to TTS
+            if !sentence_buffer.trim().is_empty() {
+                let _ = tts_tx.blocking_send(sentence_buffer);
             }
 
-            // send tps
-            if let Ok(tps) = result {
-                let tx_tps = tx_llm.clone();
-                let _ = tokio::spawn(async move {
-                    let _ = tx_tps
-                        .send(Event::default().event("tps").data(tps.to_string()))
-                        .await;
-                });
+            // Close TTS channel
+            drop(tts_tx);
+
+            // Send TPS event
+            if let Ok(tps) = tps_result {
+                let _ = event_tx_llm.blocking_send(Ok(Event::default()
+                    .event("tps")
+                    .data(format!("{:.2}", tps))));
             }
         });
     });
 
-    // --- Return SSE ---
-    Sse::new(ReceiverStream::new(rx).map(Ok::<_, Infallible>))
+    Sse::new(ReceiverStream::new(event_rx))
+}
+
+/// Optimized WAV creation and base64 encoding in a single pass
+fn samples_to_base64_wav(samples: Vec<f32>) -> anyhow::Result<String> {
+    use base64::{Engine as _, engine::general_purpose};
+    use hound::{SampleFormat, WavSpec, WavWriter};
+    use std::io::Cursor;
+
+    let spec = WavSpec {
+        channels: 1,
+        sample_rate: 22050,
+        bits_per_sample: 16,
+        sample_format: SampleFormat::Int,
+    };
+
+    let mut cursor = Cursor::new(Vec::with_capacity(samples.len() * 2 + 44));
+    let mut writer = WavWriter::new(&mut cursor, spec)?;
+
+    // Convert f32 to i16 inline
+    for sample in samples {
+        writer.write_sample((sample.clamp(-1.0, 1.0) * 32767.0) as i16)?;
+    }
+
+    writer.finalize()?;
+    Ok(general_purpose::STANDARD.encode(cursor.into_inner()))
 }

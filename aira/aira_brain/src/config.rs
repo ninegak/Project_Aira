@@ -3,4 +3,4 @@ pub struct AiraConfig {
     pub stt_path: &'static str,
     pub tts_path: &'static str,
     pub system_prompt: &'static str,
-} 
+}
