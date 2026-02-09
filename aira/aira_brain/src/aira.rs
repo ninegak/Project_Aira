@@ -1,6 +1,5 @@
-use anyhow::Result;
-
 use crate::{llm::LlmEngine, stt::SttEngine, tts::TtsEngine};
+use anyhow::Result;
 
 pub struct Aira {
     stt: SttEngine,
@@ -17,11 +16,10 @@ impl Aira {
         self.stt.transcribe(audio)
     }
 
-    pub fn think<F: FnMut(String) -> anyhow::Result<()>>(
-        &mut self,
-        user_text: &str,
-        callback: F,
-    ) -> Result<f64> {
+    pub fn think<F>(&mut self, user_text: &str, callback: F) -> Result<f64>
+    where
+        F: FnMut(&str) -> Result<()>,
+    {
         self.llm.ask(user_text, callback)
     }
 
@@ -29,5 +27,8 @@ impl Aira {
         self.tts.synthesize(text)
     }
 
-    pub fn smil() {}
+    /// Get a clone of the TTS engine for concurrent synthesis
+    pub fn get_tts(&self) -> TtsEngine {
+        self.tts.clone()
+    }
 }

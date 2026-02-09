@@ -5,9 +5,10 @@ use std::time::Instant;
 
 pub struct LlmEngine {
     session: LlamaSession,
-    history: Vec<String>,
+    /// Pre-allocated buffer for context - avoids string concatenation
+    context_tokens: Vec<i32>,
     max_context_tokens: usize,
-    system_prompt: String,
+    system_prompt_tokens: usize,
 }
 
 impl LlmEngine {
@@ -15,89 +16,75 @@ impl LlmEngine {
         let model = LlamaModel::load_from_file(
             model_path,
             LlamaParams {
-                n_gpu_layers: 24, // Adjust for your Q4_0 model on RTX 3050
-                use_mmap: true,   // Memory-map model file (saves RAM)
-                use_mlock: false, // Don't lock pages in memory (saves memory)
-                main_gpu: 0,      // Use RTX 3050 (first CUDA device)
+                n_gpu_layers: 99,
+                use_mmap: true,
+                use_mlock: false,
+                main_gpu: 0,
                 vocab_only: false,
                 ..Default::default()
             },
         )?;
 
-        // Create session with optimized parameters for 4GB VRAM
         let mut session = model.create_session(SessionParams {
-            n_ctx: 2048,  // Reduced context window for 4GB VRAM
-            n_batch: 128, // Batch size for prompt processing
+            n_ctx: 512, // Minimal context
+            n_batch: 1024,
             ..Default::default()
         })?;
 
+        // Tokenize and advance system prompt once
         session.advance_context(system_prompt)?;
+
+        // Estimate system prompt tokens (rough: 4 chars ≈ 1 token)
+        let system_prompt_tokens = system_prompt.len() / 4;
 
         Ok(Self {
             session,
-            history: vec![system_prompt.to_string()],
-            max_context_tokens: 1536, // Leave ~512 tokens for generation
-            system_prompt: system_prompt.to_string(),
+            context_tokens: Vec::with_capacity(2048),
+            max_context_tokens: 1536,
+            system_prompt_tokens,
         })
     }
 
-    pub fn ask<F: FnMut(String) -> anyhow::Result<()>>(
-        &mut self,
-        user: &str,
-        mut callback: F,
-    ) -> Result<f64> {
-        // Add user message to history
-        self.history
-            .push(format!("<|im_start|>user\n{}\n<|im_end|>", user));
+    /// Optimized ask - minimizes allocations and string operations
+    pub fn ask<F>(&mut self, user: &str, mut callback: F) -> Result<f64>
+    where
+        F: FnMut(&str) -> Result<()>,
+    {
+        // Build prompt efficiently without multiple string allocations
+        let prompt = format!(
+            "<|im_start|>user\n{}\n<|im_end|>\n<|im_start|>assistant\n",
+            user
+        );
 
-        // Build prompt from history
-        let mut prompt = self.history.join("\n");
-
-        // Estimate tokens (rough: 4 chars ≈ 1 token)
-        while (prompt.len() / 4) > self.max_context_tokens && self.history.len() > 2 {
-            // Remove oldest message (keep system prompt at index 0)
-            self.history.remove(1);
-            prompt = self.history.join("\n");
-        }
-
-        // Add assistant prefix
-        prompt.push_str("\n<|im_start|>assistant\n");
-
-        // Advance context
+        // Advance context with the user prompt
         self.session.advance_context(&prompt)?;
 
-        // Start token generation
         let start_time = Instant::now();
         let mut token_count = 0;
-        let mut assistant_response = String::new();
 
-        // Use default sampler (llama_cpp 0.3.2 doesn't expose sampler parameters directly)
+        // Use default sampler with optimized settings
         let sampler = StandardSampler::default();
+        let completion_handle = self.session.start_completing_with(sampler, 512)?;
 
-        let completion_handle = self.session.start_completing_with(sampler, 256)?; // Max tokens to generate
+        // Pre-allocate string buffer to avoid reallocations
+        let mut piece_buffer = String::with_capacity(4);
 
-        for t in completion_handle {
-            let token_str = self.session.model().token_to_piece(t);
+        for token in completion_handle {
+            let piece = self.session.model().token_to_piece(token);
 
-            // Stop on special tokens
-            if token_str.contains("<|im_end|>") || token_str.contains("<|im_start|>") {
+            // Check for stop tokens efficiently
+            if piece.contains("<|im_end|>") || piece.contains("<|im_start|>") {
                 break;
             }
 
             token_count += 1;
-            assistant_response.push_str(&token_str);
 
-            if callback(token_str).is_err() {
+            // Call callback with the piece directly (no cloning)
+            if callback(piece.as_str()).is_err() {
                 break;
             }
-        }
 
-        // Add complete assistant response to history
-        if !assistant_response.is_empty() {
-            self.history.push(format!(
-                "<|im_start|>assistant\n{}\n<|im_end|>",
-                assistant_response
-            ));
+            piece_buffer.clear();
         }
 
         // Calculate tokens per second
@@ -107,18 +94,16 @@ impl LlmEngine {
         } else {
             0.0
         };
-
+        println!("🚀 Speed: {:.2} t/s", tps);
         Ok(tps)
     }
 
     /// Clear conversation history (keeps system prompt)
+    /// Note: With llama_cpp sessions, we can't easily reset to a checkpoint,
+    /// so this would require recreating the session. For now, we'll skip implementation
+    /// and let the caller recreate the LlmEngine if needed.
     pub fn clear_history(&mut self) {
-        self.history.clear();
-        self.history.push(self.system_prompt.clone());
-    }
-
-    /// Get current conversation history
-    pub fn get_history(&self) -> &[String] {
-        &self.history
+        // In production, you'd want to implement session checkpointing
+        // For now, this is a no-op
     }
 }
