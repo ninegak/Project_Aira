@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { sendChatMessage, transcribeAudio, sendCameraFeatures } from './api/chatAPI';
 import { saveConversations, loadConversations, saveDarkMode, loadDarkMode } from './api/storageAPI';
 import type { Message, Conversation } from './types/chat';
 import type { CameraFeatures, EmotionalState } from './api/chatAPI';
+import { AudioQueueManager, VoiceMessageManager, TtsAudioPlayer } from './utils/Audiomanager';
 import Sidebar from './components/Sidebar';
 import Chat from './components/Chat';
 import Landing from './components/Landing';
@@ -19,6 +20,11 @@ function App() {
 	const [tps, setTps] = useState<string | null>(null);
 	const messagesEndRef = useRef<HTMLDivElement>(null!);
 	const [audioLoading, setAudioLoading] = useState<boolean>(false);
+
+	// Audio management - simplified with manager classes
+	const audioQueueManager = useMemo(() => new AudioQueueManager(), []);
+	const voiceMessageManager = useMemo(() => new VoiceMessageManager(audioQueueManager), [audioQueueManager]);
+	const ttsPlayer = useMemo(() => new TtsAudioPlayer(), []);
 
 	const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
 
@@ -42,9 +48,6 @@ function App() {
 	const [isCameraFullscreen, setIsCameraFullscreen] = useState<boolean>(false);
 	const voiceRecorderRef = useRef<MediaRecorder | null>(null);
 	const voiceChunksRef = useRef<Blob[]>([]);
-	const currentVoiceMessageIndexRef = useRef<number>(-1); // Track which message we're currently processing
-	const audioQueueRef = useRef<string[]>([]); // Queue for audio chunks
-	const isPlayingAudioRef = useRef<boolean>(false); // Track if currently playing
 
 	const [darkMode, setDarkMode] = useState<boolean>(() => loadDarkMode());
 
@@ -71,26 +74,20 @@ function App() {
 	};
 
 	const handleNewConversation = useCallback(() => {
-
 		// Save current conversation if it has messages
 		if (messages.length > 0) {
 			const title = getConversationTitle(messages);
 
 			if (currentConversationId) {
-				// Check if conversation already exists in array
 				setConversations((prev) => {
 					const exists = prev.some((conv) => conv.id === currentConversationId);
 					if (exists) {
-						// Update existing
-						const updated = prev.map((conv) =>
+						return prev.map((conv) =>
 							conv.id === currentConversationId
 								? { ...conv, messages: [...messages], updatedAt: new Date() }
 								: conv
 						);
-						console.log('Updated existing conversation. Total conversations:', updated.length);
-						return updated;
 					} else {
-						// Add new conversation that wasn't in array yet
 						const newConv: Conversation = {
 							id: currentConversationId,
 							title,
@@ -98,13 +95,10 @@ function App() {
 							createdAt: new Date(),
 							updatedAt: new Date(),
 						};
-						const updated = [newConv, ...prev];
-						console.log('Added conversation to array. Total conversations:', updated.length);
-						return updated;
+						return [newConv, ...prev];
 					}
 				});
 			} else {
-				// Create new conversation
 				const newConv: Conversation = {
 					id: generateId(),
 					title,
@@ -112,11 +106,7 @@ function App() {
 					createdAt: new Date(),
 					updatedAt: new Date(),
 				};
-				setConversations((prev) => {
-					const updated = [newConv, ...prev];
-					console.log('Created new conversation. Total conversations:', updated.length);
-					return updated;
-				});
+				setConversations((prev) => [newConv, ...prev]);
 			}
 		}
 
@@ -128,16 +118,25 @@ function App() {
 		setEmotion(null);
 		setCurrentConversationId(null);
 		isFirstMessageRef.current = true;
-	}, [messages, currentConversationId]);
+
+		// Stop any audio playback
+		audioQueueManager.stop();
+		ttsPlayer.stop();
+		voiceMessageManager.reset();
+	}, [messages, currentConversationId, audioQueueManager, ttsPlayer, voiceMessageManager]);
 
 	const handleSwitchConversation = useCallback(
 		(conversationId: string) => {
+			// Stop any audio playback
+			audioQueueManager.stop();
+			ttsPlayer.stop();
+			voiceMessageManager.reset();
+
 			// Save current conversation if it has messages
 			if (messages.length > 0 && currentConversationId !== conversationId) {
 				const title = getConversationTitle(messages);
 
 				if (currentConversationId) {
-					// Check if conversation already exists
 					setConversations((prev) => {
 						const exists = prev.some((conv) => conv.id === currentConversationId);
 						if (exists) {
@@ -147,7 +146,6 @@ function App() {
 									: conv
 							);
 						} else {
-							// Add new conversation
 							const newConv: Conversation = {
 								id: currentConversationId,
 								title,
@@ -182,7 +180,7 @@ function App() {
 				isFirstMessageRef.current = false;
 			}
 		},
-		[conversations, messages, currentConversationId]
+		[conversations, messages, currentConversationId, audioQueueManager, ttsPlayer, voiceMessageManager]
 	);
 
 	const handleDeleteConversation = useCallback(
@@ -198,86 +196,64 @@ function App() {
 				setPlayingMessageIndex(null);
 				setEmotion(null);
 				isFirstMessageRef.current = true;
+				audioQueueManager.stop();
+				ttsPlayer.stop();
 			}
 		},
-		[currentConversationId]
+		[currentConversationId, audioQueueManager, ttsPlayer]
 	);
 
 	// Toggle camera on/off with modal confirmation
 	const toggleCamera = useCallback(() => {
-		console.log('toggleCamera called, current state:', cameraEnabled);
 		if (!cameraEnabled) {
-			console.log('Camera is off, showing privacy modal...');
 			setShowPrivacyModal(true);
 		} else {
-			console.log('Turning camera off...');
 			setCameraEnabled(false);
 		}
 	}, [cameraEnabled]);
 
-	// Handle modal confirm
 	const handleCameraConfirm = useCallback(() => {
-		console.log('Privacy modal confirmed, enabling camera...');
 		setShowPrivacyModal(false);
 		setCameraEnabled(true);
-		setIsCameraFullscreen(true); // Auto-start in fullscreen mode
+		setIsCameraFullscreen(true);
 	}, []);
 
-	// Handle modal cancel
 	const handleCameraCancel = useCallback(() => {
-		console.log('Privacy modal cancelled');
 		setShowPrivacyModal(false);
 	}, []);
 
-	// Toggle voice mode
 	const toggleVoiceMode = useCallback(() => {
 		setVoiceModeEnabled((prev) => !prev);
 	}, []);
 
-	// Toggle camera fullscreen
 	const toggleCameraFullscreen = useCallback(() => {
 		setIsCameraFullscreen((prev) => !prev);
 	}, []);
 
-	// Close camera completely (for errors)
 	const closeCamera = useCallback(() => {
-		console.log('Closing camera due to error...');
 		setCameraEnabled(false);
 		setIsCameraFullscreen(false);
 	}, []);
 
-	// Use ref to access latest messages in playTtsAudio
-	const messagesRef = useRef(messages);
-	messagesRef.current = messages;
-
+	// Simplified TTS playback using the new player
 	const playTtsAudio = useCallback(
 		async (messageIndex: number) => {
-			// Access latest messages via ref
-			const message = messagesRef.current[messageIndex];
+			const message = messages[messageIndex];
 			if (!message?.audioData || message.audioData.length === 0) {
 				console.log('No audio data to play at index:', messageIndex);
 				return;
 			}
 
-			if (playingMessageIndex !== null) {
-				console.log('Already playing audio, skipping');
+			if (ttsPlayer.isPlaying(messageIndex)) {
+				console.log('Already playing this message');
 				return;
 			}
 
-			console.log('Playing TTS audio, chunks:', message.audioData.length);
 			setPlayingMessageIndex(messageIndex);
 			setAudioLoading(true);
 
 			try {
-				for (const base64 of message.audioData) {
-					await new Promise<void>((resolve, reject) => {
-						const audio = new Audio('data:audio/wav;base64,' + base64);
-						audio.onended = () => resolve();
-						audio.onerror = (e) => reject(new Error('Audio playback failed: ' + e));
-						audio.play().catch(reject);
-					});
-				}
-				console.log('TTS playback complete');
+				await ttsPlayer.play(messageIndex, message.audioData);
 			} catch (error) {
 				console.error('Error playing audio:', error);
 			} finally {
@@ -285,56 +261,10 @@ function App() {
 				setAudioLoading(false);
 			}
 		},
-		[playingMessageIndex]
+		[messages, ttsPlayer]
 	);
 
-	// Play audio chunks sequentially from queue using a ref to avoid closure issues
-	const playNextAudioChunkRef = useRef<() => void>(() => { });
-
-	playNextAudioChunkRef.current = async () => {
-		if (audioQueueRef.current.length === 0) {
-			isPlayingAudioRef.current = false;
-			return;
-		}
-
-		isPlayingAudioRef.current = true;
-		const audioBase64 = audioQueueRef.current.shift();
-		if (!audioBase64) {
-			isPlayingAudioRef.current = false;
-			return;
-		}
-
-		console.log('Playing audio chunk, remaining in queue:', audioQueueRef.current.length);
-
-		try {
-			const audio = new Audio('data:audio/wav;base64,' + audioBase64);
-			audio.volume = 1.0;
-
-			// Wait for audio to finish before playing next
-			await new Promise<void>((resolve) => {
-				audio.onended = () => resolve();
-				audio.onerror = (e) => {
-					console.error('Audio error:', e);
-					resolve(); // Continue even on error
-				};
-				audio.play().catch(e => {
-					console.error('Error playing audio chunk:', e);
-					resolve(); // Continue on error
-				});
-			});
-
-			// Small delay between chunks for natural flow
-			await new Promise(resolve => setTimeout(resolve, 100));
-
-			// Play next chunk using ref to avoid closure issues
-			playNextAudioChunkRef.current();
-		} catch (e) {
-			console.error('Error in audio playback:', e);
-			playNextAudioChunkRef.current(); // Continue on error
-		}
-	};
-
-	// Handle voice message completion - sends to Aira and optionally auto-plays response
+	// Simplified voice message handler using managers
 	const handleVoiceMessage = useCallback(
 		async (text: string) => {
 			if (!text.trim()) return;
@@ -348,9 +278,8 @@ function App() {
 				isFirstMessageRef.current = false;
 			}
 
-			// Calculate Aira message index before adding messages
-			const currentLength = messages.length;
-			const airaMessageIndex = currentLength + 1; // User message + Aira message
+			// Start tracking this voice message
+			const airaMessageIndex = voiceMessageManager.startMessage(messages.length);
 
 			setMessages((prevMessages) => [...prevMessages, userMessage]);
 			setLoading(true);
@@ -362,111 +291,64 @@ function App() {
 				return [...prevMessages, airaMessage];
 			});
 
-			console.log('Sending voice message to server:', text);
-			console.log('Aira message will be at index:', airaMessageIndex);
-			console.log('Current messages length:', currentLength);
+			console.log('📤 Sending voice message:', text);
 
-			// Track this as the current voice message and reset audio queue
-			currentVoiceMessageIndexRef.current = airaMessageIndex;
-			audioQueueRef.current = []; // Clear any old audio
-			isPlayingAudioRef.current = false;
-
-			console.log('Starting chat request...');
 			await sendChatMessage(text, {
 				onToken: (token) => {
-					console.log('Received token:', token.substring(0, 20) + '...');
-					// Use functional update to always get latest state
 					setMessages((prevMessages) => {
 						if (prevMessages.length === 0) return prevMessages;
 						const lastMessage = prevMessages[prevMessages.length - 1];
 						if (lastMessage.sender !== 'aira') return prevMessages;
-						const updatedLastMessage: Message = {
-							...lastMessage,
-							text: lastMessage.text + token,
-						};
-						return [...prevMessages.slice(0, -1), updatedLastMessage];
+						return [...prevMessages.slice(0, -1), { ...lastMessage, text: lastMessage.text + token }];
 					});
 				},
 				onTps: (tpsValue) => {
 					setTps(tpsValue);
 					setMessages((prevMessages) => {
-						// Safety check: if messages array is empty, skip
-						if (prevMessages.length === 0 || !prevMessages[prevMessages.length - 1]) {
-							return prevMessages;
-						}
+						if (prevMessages.length === 0) return prevMessages;
 						const lastMessage = prevMessages[prevMessages.length - 1];
-						const updatedLastMessage: Message = {
-							...lastMessage,
-							tps: tpsValue,
-						};
-						return [...prevMessages.slice(0, -1), updatedLastMessage];
+						return [...prevMessages.slice(0, -1), { ...lastMessage, tps: tpsValue }];
 					});
 				},
 				onAudio: (audioBase64) => {
-					// Queue audio chunks and play sequentially for current message
-					if (currentVoiceMessageIndexRef.current === airaMessageIndex) {
-						audioQueueRef.current.push(audioBase64);
-						console.log('Queued audio chunk for index:', airaMessageIndex, 'queue size:', audioQueueRef.current.length);
+					// Use manager to handle audio chunk
+					voiceMessageManager.handleAudioChunk(audioBase64, airaMessageIndex);
 
-						// Start playing if not already playing
-						if (!isPlayingAudioRef.current) {
-							playNextAudioChunkRef.current();
-						}
-					} else {
-						console.log('Skipping audio chunk - wrong message index. Current:', currentVoiceMessageIndexRef.current, 'Expected:', airaMessageIndex);
-					}
+					// Store in message data
 					setMessages((prevMessages) => {
-						// Safety check: if messages array is empty, skip
-						if (prevMessages.length === 0) {
-							return prevMessages;
-						}
+						if (prevMessages.length === 0) return prevMessages;
 						const lastMessage = prevMessages[prevMessages.length - 1];
 						if (lastMessage.sender === 'aira') {
-							const updatedLastMessage: Message = {
-								...lastMessage,
-								audioData: [...(lastMessage.audioData || []), audioBase64],
-							};
-							return [...prevMessages.slice(0, -1), updatedLastMessage];
+							return [
+								...prevMessages.slice(0, -1),
+								{ ...lastMessage, audioData: [...(lastMessage.audioData || []), audioBase64] }
+							];
 						}
 						return prevMessages;
 					});
 				},
 				onError: (error) => {
 					setMessages((prevMessages) => {
-						// Safety check: if messages array is empty, skip
-						if (prevMessages.length === 0 || !prevMessages[prevMessages.length - 1]) {
-							return prevMessages;
-						}
+						if (prevMessages.length === 0) return prevMessages;
 						const lastMessage = prevMessages[prevMessages.length - 1];
-						const updatedText = lastMessage.text + `\n\nError: ${error}`;
-						const updatedLastMessage: Message = { ...lastMessage, text: updatedText };
-						return [...prevMessages.slice(0, -1), updatedLastMessage];
+						return [...prevMessages.slice(0, -1), { ...lastMessage, text: lastMessage.text + `\n\nError: ${error}` }];
 					});
 				},
 				onComplete: () => {
-					console.log('Voice chat message complete');
+					console.log('✅ Voice message complete');
 					setLoading(false);
-					// Reset current voice message tracking
-					currentVoiceMessageIndexRef.current = -1;
-					// Auto-play TTS in live mode after a short delay to ensure audio data is received
-					if (voiceModeEnabled && airaMessageIndex >= 0) {
-						console.log('Auto-playing TTS response in live mode at index:', airaMessageIndex);
-						// Wait a bit for final audio chunks to arrive
-						setTimeout(() => {
-							playTtsAudio(airaMessageIndex);
-						}, 500);
-					}
+					voiceMessageManager.completeMessage();
 				},
 			}).catch((err) => {
-				console.error('Failed to send voice message:', err);
+				console.error('❌ Failed to send voice message:', err);
 				setLoading(false);
-				currentVoiceMessageIndexRef.current = -1;
+				voiceMessageManager.reset();
 			});
 		},
-		[currentConversationId, messages.length, voiceModeEnabled, playTtsAudio, cameraEnabled, playingMessageIndex, currentVoiceMessageIndexRef]
+		[currentConversationId, messages.length, voiceMessageManager]
 	);
 
-	// Start voice recording for Live mode
+	// Voice recording for Live mode - simplified
 	const startVoiceRecording = useCallback(async () => {
 		try {
 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -484,28 +366,26 @@ function App() {
 			voiceRecorderRef.current.onstop = async () => {
 				const audioBlob = new Blob(voiceChunksRef.current, { type: 'audio/webm' });
 
-				// Transcribe audio and send as message
 				try {
-					console.log('Voice recording completed, transcribing...');
+					console.log('🎤 Voice recording completed, transcribing...');
 					const result = await transcribeAudio(audioBlob);
-					console.log('Transcription:', result.text);
+					console.log('📝 Transcription:', result.text);
 
 					if (result.text.trim()) {
-						// Send transcribed text as message
 						await handleVoiceMessage(result.text);
 					}
 				} catch (error) {
-					console.error('Error transcribing voice:', error);
+					console.error('❌ Error transcribing voice:', error);
 				} finally {
 					stream.getTracks().forEach((track) => track.stop());
 					setIsVoiceRecording(false);
 
 					// Auto-restart recording in live mode if still enabled
 					if (voiceModeEnabled && cameraEnabled) {
-						console.log('Auto-restarting voice recording in live mode');
+						console.log('🔄 Auto-restarting voice recording');
 						setTimeout(() => {
 							startVoiceRecording();
-						}, 500); // Small delay to allow processing
+						}, 500);
 					}
 				}
 			};
@@ -513,12 +393,11 @@ function App() {
 			voiceRecorderRef.current.start();
 			setIsVoiceRecording(true);
 		} catch (err) {
-			console.error('Error accessing microphone:', err);
+			console.error('❌ Error accessing microphone:', err);
 			alert('Please allow microphone access for voice mode.');
 		}
 	}, [cameraEnabled, voiceModeEnabled, handleVoiceMessage]);
 
-	// Stop voice recording
 	const stopVoiceRecording = useCallback(() => {
 		if (voiceRecorderRef.current && isVoiceRecording) {
 			voiceRecorderRef.current.stop();
@@ -554,78 +433,49 @@ function App() {
 			const airaMessage: Message = { sender: 'aira', text: '', audioData: [] };
 			setMessages((prevMessages) => [...prevMessages, airaMessage]);
 
-			console.log('Sending message to server:', messageToSend);
 			sendChatMessage(messageToSend, {
 				onToken: (token) => {
 					setMessages((prevMessages) => {
-						// Safety check: if messages array is empty, skip
-						if (prevMessages.length === 0) {
-							console.log('Messages array empty, skipping token');
-							return prevMessages;
-						}
+						if (prevMessages.length === 0) return prevMessages;
 						const lastMessage = prevMessages[prevMessages.length - 1];
-						// Safety check: if no last message, skip
-						if (!lastMessage) {
-							console.log('No last message, skipping token');
-							return prevMessages;
-						}
-						const updatedLastMessage: Message = {
-							...lastMessage,
-							text: lastMessage.text + token,
-						};
-						return [...prevMessages.slice(0, -1), updatedLastMessage];
+						if (!lastMessage) return prevMessages;
+						return [...prevMessages.slice(0, -1), { ...lastMessage, text: lastMessage.text + token }];
 					});
 				},
 				onTps: (tpsValue) => {
 					setTps(tpsValue);
 					setMessages((prevMessages) => {
-						// Safety check: if messages array is empty, skip
-						if (prevMessages.length === 0 || !prevMessages[prevMessages.length - 1]) {
-							return prevMessages;
-						}
+						if (prevMessages.length === 0 || !prevMessages[prevMessages.length - 1]) return prevMessages;
 						const lastMessage = prevMessages[prevMessages.length - 1];
-						const updatedLastMessage: Message = {
-							...lastMessage,
-							tps: tpsValue,
-						};
-						return [...prevMessages.slice(0, -1), updatedLastMessage];
+						return [...prevMessages.slice(0, -1), { ...lastMessage, tps: tpsValue }];
 					});
 				},
 				onAudio: (audioBase64) => {
 					setMessages((prevMessages) => {
-						// Safety check: if messages array is empty, skip
-						if (prevMessages.length === 0 || !prevMessages[prevMessages.length - 1]) {
-							return prevMessages;
-						}
+						if (prevMessages.length === 0 || !prevMessages[prevMessages.length - 1]) return prevMessages;
 						const lastMessage = prevMessages[prevMessages.length - 1];
 						if (lastMessage.sender === 'aira') {
-							const updatedLastMessage: Message = {
-								...lastMessage,
-								audioData: [...(lastMessage.audioData || []), audioBase64],
-							};
-							return [...prevMessages.slice(0, -1), updatedLastMessage];
+							return [
+								...prevMessages.slice(0, -1),
+								{ ...lastMessage, audioData: [...(lastMessage.audioData || []), audioBase64] }
+							];
 						}
 						return prevMessages;
 					});
 				},
 				onError: (error) => {
 					setMessages((prevMessages) => {
-						// Safety check: if messages array is empty, skip
-						if (prevMessages.length === 0 || !prevMessages[prevMessages.length - 1]) {
-							return prevMessages;
-						}
+						if (prevMessages.length === 0 || !prevMessages[prevMessages.length - 1]) return prevMessages;
 						const lastMessage = prevMessages[prevMessages.length - 1];
-						const updatedText = lastMessage.text + `\n\nError: ${error}`;
-						const updatedLastMessage: Message = { ...lastMessage, text: updatedText };
-						return [...prevMessages.slice(0, -1), updatedLastMessage];
+						return [...prevMessages.slice(0, -1), { ...lastMessage, text: lastMessage.text + `\n\nError: ${error}` }];
 					});
 				},
 				onComplete: () => {
-					console.log('Chat message complete');
+					console.log('✅ Chat message complete');
 					setLoading(false);
 				},
 			}).catch((err) => {
-				console.error('Failed to send message:', err);
+				console.error('❌ Failed to send message:', err);
 				setLoading(false);
 			});
 		}
@@ -647,15 +497,13 @@ function App() {
 
 			mediaRecorder.current.onstop = async () => {
 				const audioBlob = new Blob(audioChunks.current, { type: 'audio/webm' });
-
 				setAudioLoading(true);
 
 				try {
-					const result = await analyzeEmotion(audioBlob);
-					setEmotion(result.dominant_emotion);
+					// Emotion analysis removed - placeholder if needed
+					setEmotion('Feature disabled');
 				} catch (error) {
-					console.error('Error analyzing emotion:', error);
-					setEmotion('Error: Could not analyze emotion');
+					console.error('Error:', error);
 				} finally {
 					setAudioLoading(false);
 					stream.getTracks().forEach((track) => track.stop());
@@ -686,30 +534,30 @@ function App() {
 			if (mediaRecorder.current && mediaRecorder.current.state === 'recording') {
 				mediaRecorder.current.stop();
 			}
+			// Cleanup audio managers
+			audioQueueManager.stop();
+			ttsPlayer.stop();
 		};
-	}, []);
+	}, [audioQueueManager, ttsPlayer]);
 
-	// Sync current messages to conversations whenever they change
+	// Sync current messages to conversations
 	useEffect(() => {
 		if (currentConversationId && messages.length > 0) {
 			setConversations((prev) => {
-				// Check if conversation already exists
 				const exists = prev.some((conv) => conv.id === currentConversationId);
 
 				if (exists) {
-					// Update existing conversation
 					return prev.map((conv) => {
 						if (conv.id === currentConversationId) {
 							return {
 								...conv,
 								messages: messages,
-								updatedAt: Date.now(),
+								updatedAt: new Date(),
 							};
 						}
 						return conv;
 					});
 				} else {
-					// Create new conversation
 					const title = getConversationTitle(messages);
 					const newConv: Conversation = {
 						id: currentConversationId,
@@ -724,26 +572,23 @@ function App() {
 		}
 	}, [messages, currentConversationId]);
 
-	// Save conversations to localStorage whenever they change
+	// Save conversations to localStorage
 	useEffect(() => {
 		saveConversations(conversations);
 	}, [conversations]);
 
-	// Throttle camera feature updates to prevent server overload
+	// Throttle camera feature updates
 	const lastCameraUpdateRef = useRef<number>(0);
 
-	// Handle camera features update
 	const handleCameraFeatures = useCallback(async (features: CameraFeatures) => {
 		setCameraFeatures(features);
 
-		// Throttle: only send every 1000ms (1 second)
 		const now = Date.now();
 		if (now - lastCameraUpdateRef.current < 1000) {
-			return; // Skip this update
+			return;
 		}
 		lastCameraUpdateRef.current = now;
 
-		// Send features to backend for emotional state calculation
 		if (features.face_present) {
 			try {
 				const state = await sendCameraFeatures(features);
@@ -757,9 +602,6 @@ function App() {
 	if (viewState === 'landing') {
 		return <Landing darkMode={darkMode} onStartChat={handleStartChat} />;
 	}
-
-	// Debug logging disabled - was causing console spam
-	// console.log('Rendering with conversations:', conversations.length, 'Current ID:', currentConversationId);
 
 	return (
 		<div className="d-flex vh-100" style={{ background: darkMode ? '#1a1d23' : '#F8F9FA' }}>
@@ -782,7 +624,6 @@ function App() {
 					<button
 						className="btn btn-sm d-flex align-items-center gap-2"
 						onClick={toggleMode}
-						aria-label={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
 						style={{
 							background: darkMode ? 'rgba(74, 95, 127, 0.2)' : 'rgba(74, 95, 127, 0.1)',
 							color: darkMode ? '#A8B5C4' : '#4A5F7F',
@@ -795,43 +636,27 @@ function App() {
 						{darkMode ? '☀️ Light' : '🌙 Dark'}
 					</button>
 					{cameraEnabled && (
-						<>
-							<button
-								onClick={toggleVoiceMode}
-								className="btn btn-sm d-flex align-items-center gap-2"
-								style={{
-									background: voiceModeEnabled
-										? darkMode
-											? 'rgba(255, 193, 7, 0.2)'
-											: 'rgba(255, 193, 7, 0.1)'
-										: darkMode
-											? 'rgba(74, 95, 127, 0.2)'
-											: 'rgba(74, 95, 127, 0.1)',
-									color: voiceModeEnabled ? '#ffc107' : darkMode ? '#A8B5C4' : '#4A5F7F',
-									border: `1px solid ${voiceModeEnabled ? '#ffc107' : darkMode ? 'rgba(74, 95, 127, 0.3)' : 'rgba(74, 95, 127, 0.15)'}`,
-									borderRadius: '20px',
-									padding: '6px 12px',
-									fontSize: '0.85rem',
-								}}
-								title={voiceModeEnabled ? 'Disable voice mode' : 'Enable voice mode'}
-							>
-								<svg
-									width="16"
-									height="16"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									strokeWidth="2"
-									strokeLinecap="round"
-									strokeLinejoin="round"
-								>
-									<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
-									<path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-									<line x1="12" y1="19" x2="12" y2="22"></line>
-								</svg>
-								{voiceModeEnabled ? 'Live On' : 'Live Off'}
-							</button>
-						</>
+						<button
+							onClick={toggleVoiceMode}
+							className="btn btn-sm d-flex align-items-center gap-2"
+							style={{
+								background: voiceModeEnabled
+									? darkMode ? 'rgba(255, 193, 7, 0.2)' : 'rgba(255, 193, 7, 0.1)'
+									: darkMode ? 'rgba(74, 95, 127, 0.2)' : 'rgba(74, 95, 127, 0.1)',
+								color: voiceModeEnabled ? '#ffc107' : darkMode ? '#A8B5C4' : '#4A5F7F',
+								border: `1px solid ${voiceModeEnabled ? '#ffc107' : darkMode ? 'rgba(74, 95, 127, 0.3)' : 'rgba(74, 95, 127, 0.15)'}`,
+								borderRadius: '20px',
+								padding: '6px 12px',
+								fontSize: '0.85rem',
+							}}
+						>
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+								<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+								<path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+								<line x1="12" y1="19" x2="12" y2="22"></line>
+							</svg>
+							{voiceModeEnabled ? 'Live On' : 'Live Off'}
+						</button>
 					)}
 				</div>
 				<Chat
@@ -861,7 +686,6 @@ function App() {
 				darkMode={darkMode}
 			/>
 
-			{/* Fullscreen Camera View - Gemini Live Style */}
 			{cameraEnabled && (
 				<CameraSensor
 					enabled={cameraEnabled}
