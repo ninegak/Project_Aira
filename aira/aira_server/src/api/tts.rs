@@ -10,8 +10,12 @@ use axum::{
 };
 use hound::{SampleFormat, WavSpec, WavWriter};
 use std::io::Cursor;
+use tokio::sync::Semaphore;
 
-pub async fn tts(State(aira): State<SharedAira>, Json(req): Json<TtsRequest>) -> impl IntoResponse {
+pub async fn tts(
+    State((aira, _semaphore)): State<(SharedAira, &'static Semaphore)>,
+    Json(req): Json<TtsRequest>,
+) -> impl IntoResponse {
     // Clone TTS engine to avoid holding lock during synthesis
     let tts_engine = {
         let guard = aira.lock().unwrap();

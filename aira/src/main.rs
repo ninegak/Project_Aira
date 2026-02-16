@@ -4,7 +4,7 @@ use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     terminal,
 };
-use rodio::{OutputStream, Sink, buffer::SamplesBuffer};
+use rodio::{buffer::SamplesBuffer, OutputStream, Sink};
 use std::{
     io::{self, Write},
     sync::{Arc, Mutex},
@@ -151,12 +151,12 @@ fn text_loop(mut aira: Aira) -> Result<()> {
         }
 
         let mut full_reply_text = String::new();
-        let mut print_callback = |token: String| {
+        let mut print_callback = |token: &str| {
             print!("{}", token);
-            full_reply_text.push_str(&token);
+            full_reply_text.push_str(token);
             std::io::stdout().flush().context("Failed to flush stdout")
         };
-        
+
         println!("Aira: ");
         let _tps = aira.think(text, &mut print_callback)?;
         println!(); // Add newline after streaming
@@ -185,12 +185,12 @@ fn voice_loop(mut aira: aira_brain::aira::Aira) -> Result<()> {
         println!("You: {}", text);
 
         let mut full_reply_text = String::new();
-        let mut print_callback = |token: String| {
+        let mut print_callback = |token: &str| {
             print!("{}", token);
-            full_reply_text.push_str(&token);
+            full_reply_text.push_str(token);
             std::io::stdout().flush().context("Failed to flush stdout")
         };
-        
+
         println!("Aira: ");
         let _tps = aira.think(&text, &mut print_callback)?;
         println!(); // Add newline after streaming

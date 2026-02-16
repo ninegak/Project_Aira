@@ -35,6 +35,9 @@ interface ChatProps {
 	onPlayAudio: (messageIndex: number) => void;
 	darkMode: boolean;
 	playingMessageIndex: number | null;
+	cameraEnabled: boolean;
+	onToggleCamera: () => void;
+	isVoiceRecording?: boolean;
 }
 
 // Memoized message component for better performance
@@ -53,16 +56,16 @@ const MessageBubble = React.memo<{
 	>
 		{msg.sender === 'aira' && (
 			<div className="me-3 d-flex flex-column align-items-center">
-				<div 
+				<div
 					className="rounded-circle d-flex align-items-center justify-content-center shadow-sm"
-					style={{ 
-						width: '36px', 
+					style={{
+						width: '36px',
 						height: '36px',
 						background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.primaryLight} 100%)`,
 						border: `2px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.8)'}`,
 					}}
 				>
-					<span className="text-white fw-bold" style={{ fontSize: '14px' }}>A</span>
+					<span style={{ fontSize: '18px' }}>🌸</span>
 				</div>
 			</div>
 		)}
@@ -84,9 +87,9 @@ const MessageBubble = React.memo<{
 			{msg.sender === 'aira' && (
 				<div className="mt-2 d-flex align-items-center gap-2">
 					{msg.tps && (
-						<span 
+						<span
 							className="badge"
-							style={{ 
+							style={{
 								background: darkMode ? 'rgba(74, 95, 127, 0.25)' : 'rgba(74, 95, 127, 0.12)',
 								color: darkMode ? '#8B9AAF' : COLORS.primary,
 								fontSize: '0.7rem',
@@ -106,7 +109,7 @@ const MessageBubble = React.memo<{
 							disabled={isLoading}
 							className="d-inline-flex align-items-center justify-content-center"
 							style={{
-								background: isPlaying 
+								background: isPlaying
 									? (darkMode ? 'rgba(74, 95, 127, 0.4)' : 'rgba(74, 95, 127, 0.2)')
 									: (darkMode ? 'rgba(74, 95, 127, 0.2)' : 'rgba(74, 95, 127, 0.08)'),
 								color: darkMode ? '#A8B5C4' : COLORS.primary,
@@ -129,16 +132,16 @@ const MessageBubble = React.memo<{
 								}
 							}}
 							aria-label={isPlaying ? "Playing audio" : "Play Aira's voice"}
-								title={isPlaying ? "Playing..." : "Play voice"}
-							>
+							title={isPlaying ? "Playing..." : "Play voice"}
+						>
 							{isLoading ? (
-								<span 
-									className="spinner-border spinner-border-sm" 
+								<span
+									className="spinner-border spinner-border-sm"
 									role="status"
-									style={{ 
-										width: '12px', 
+									style={{
+										width: '12px',
 										height: '12px',
-										color: COLORS.primary 
+										color: COLORS.primary
 									}}
 								>
 									<span className="visually-hidden">Playing...</span>
@@ -213,16 +216,15 @@ const Chat: React.FC<ChatProps> = ({
 	inputMessage,
 	loading,
 	audioLoading,
-	isRecording,
 	emotion,
 	handleSendMessage,
 	setInputMessage,
-	startRecording,
-	stopRecording,
 	messagesEndRef,
 	onPlayAudio,
 	darkMode,
-	playingMessageIndex
+	playingMessageIndex,
+	cameraEnabled,
+	onToggleCamera,
 }) => {
 	// Memoize class names to avoid recalculation
 	const classes = useMemo(() => ({
@@ -249,14 +251,14 @@ const Chat: React.FC<ChatProps> = ({
 	}, [setInputMessage]);
 
 	return (
-		<div 
+		<div
 			className={`d-flex flex-column h-100 ${classes.bgClass}`}
 			style={{ background: classes.bgColor }}
 		>
 			<div className="flex-grow-1 p-4 overflow-auto">
 				{messages.length === 0 ? (
 					<div className="d-flex flex-column align-items-center justify-content-center h-100">
-						<div 
+						<div
 							className="rounded-circle d-flex align-items-center justify-content-center mb-4 shadow-sm"
 							style={{
 								width: '72px',
@@ -267,16 +269,16 @@ const Chat: React.FC<ChatProps> = ({
 						>
 							<span className="fs-2">✨</span>
 						</div>
-						<h1 
+						<h1
 							className="fw-bold mb-3"
-							style={{ 
+							style={{
 								color: classes.textColor,
 								fontSize: '2rem'
 							}}
 						>
 							Howdy! What's on your mind?
 						</h1>
-						<p 
+						<p
 							className="mb-1"
 							style={{ color: classes.textMuted, fontSize: '1.1rem' }}
 						>
@@ -306,20 +308,20 @@ const Chat: React.FC<ChatProps> = ({
 				{loading && (
 					<div className="d-flex mb-4 justify-content-start">
 						<div className="me-3">
-							<div 
+							<div
 								className="rounded-circle d-flex align-items-center justify-content-center"
-								style={{ 
-									width: '36px', 
+								style={{
+									width: '36px',
 									height: '36px',
 									background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.primaryLight} 100%)`,
 								}}
 							>
-								<span className="text-white fw-bold" style={{ fontSize: '14px' }}>A</span>
+								<span style={{ fontSize: '18px' }}>🌸</span>
 							</div>
 						</div>
-						<div 
+						<div
 							className="border-0 shadow-sm d-flex align-items-center gap-2"
-							style={{ 
+							style={{
 								maxWidth: '70%',
 								borderRadius: '18px 18px 18px 4px',
 								background: classes.cardAiraBg,
@@ -327,8 +329,8 @@ const Chat: React.FC<ChatProps> = ({
 								color: classes.textMuted
 							}}
 						>
-							<div 
-								className="spinner-border spinner-border-sm" 
+							<div
+								className="spinner-border spinner-border-sm"
 								role="status"
 								style={{ color: COLORS.primary }}
 							>
@@ -342,14 +344,14 @@ const Chat: React.FC<ChatProps> = ({
 				<div ref={messagesEndRef} />
 			</div>
 
-			<div 
+			<div
 				className="p-4"
-				style={{ 
+				style={{
 					background: darkMode ? '#1a1d23' : '#FFFFFF',
 					borderTop: `1px solid ${darkMode ? '#2A2D35' : '#E8EAED'}`
 				}}
 			>
-				<div 
+				<div
 					className="d-flex gap-2 align-items-center"
 					style={{
 						background: classes.inputBg,
@@ -389,14 +391,14 @@ const Chat: React.FC<ChatProps> = ({
 							transition: 'all 0.2s ease'
 						}}
 					>
-						<svg 
-							width="20" 
-							height="20" 
-							viewBox="0 0 24 24" 
-							fill="none" 
-							stroke="currentColor" 
-							strokeWidth="2" 
-							strokeLinecap="round" 
+						<svg
+							width="20"
+							height="20"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="2"
+							strokeLinecap="round"
 							strokeLinejoin="round"
 						>
 							<line x1="22" y1="2" x2="11" y2="13"></line>
@@ -405,37 +407,45 @@ const Chat: React.FC<ChatProps> = ({
 					</button>
 					<button
 						className="btn d-flex align-items-center justify-content-center"
-						onClick={isRecording ? stopRecording : startRecording}
-						disabled={loading || audioLoading}
-						aria-label={isRecording ? 'Stop recording' : 'Start recording'}
-						title={isRecording ? 'Stop recording' : 'Start voice recording'}
+						onClick={onToggleCamera}
+						disabled={loading}
+						aria-label={cameraEnabled ? 'Disable camera' : 'Enable camera'}
+						title={cameraEnabled ? 'Disable camera' : 'Enable camera'}
 						style={{
-							background: isRecording ? '#DC3545' : 'transparent',
-							color: isRecording ? 'white' : classes.textMuted,
+							background: cameraEnabled
+								? darkMode
+									? 'rgba(40, 167, 69, 0.2)'
+									: 'rgba(40, 167, 69, 0.1)'
+								: darkMode
+									? 'rgba(74, 95, 127, 0.2)'
+									: 'rgba(74, 95, 127, 0.1)',
+							color: cameraEnabled ? '#28a745' : classes.textMuted,
 							borderRadius: '50%',
 							width: '44px',
 							height: '44px',
-							border: isRecording ? 'none' : `1px solid ${classes.inputBorder}`,
+							border: `1px solid ${cameraEnabled ? '#28a745' : classes.inputBorder}`,
 							transition: 'all 0.2s ease'
 						}}
 					>
-						{isRecording ? (
-							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-								<rect x="6" y="6" width="12" height="12" rx="2"></rect>
-							</svg>
-						) : (
-							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-								<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
-								<path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-								<line x1="12" y1="19" x2="12" y2="22"></line>
-							</svg>
-						)}
+						<svg
+							width="20"
+							height="20"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="2"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+						>
+							<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+							<circle cx="12" cy="13" r="4"></circle>
+						</svg>
 					</button>
 				</div>
 
 				{emotion && (
 					<p className="text-center mt-3 mb-0">
-						<span 
+						<span
 							className="badge"
 							style={{
 								background: darkMode ? 'rgba(74, 95, 127, 0.25)' : 'rgba(74, 95, 127, 0.12)',
@@ -450,7 +460,7 @@ const Chat: React.FC<ChatProps> = ({
 					</p>
 				)}
 
-				<p 
+				<p
 					className="text-center mt-3 mb-0 small"
 					style={{ color: classes.textMuted }}
 				>
