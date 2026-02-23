@@ -11,22 +11,22 @@ export class AudioQueueManager {
 	private currentAudio: HTMLAudioElement | null = null;
 	private onComplete?: () => void;
 
-	/**
-	 * Add audio chunk to queue and start playing if not already playing
-	 */
+	// Add audio chunk to queue and start playing if not already playing
 	enqueue(audioBase64: string): void {
 		this.queue.push(audioBase64);
 		console.log(`📥 Queued audio chunk. Queue size: ${this.queue.length}`);
 
 		// Start playing if not already playing
 		if (!this.isPlaying) {
-			this.playNext();
+			// Call async playNext and catch any errors
+			this.playNext().catch((error) => {
+				console.error('❌ Error in playNext:', error);
+				this.isPlaying = false;
+			});
 		}
 	}
 
-	/**
-	 * Play next audio chunk in queue
-	 */
+	// Play next audio chunk in queue
 	private async playNext(): Promise<void> {
 		// Base case: queue is empty
 		if (this.queue.length === 0) {
@@ -46,46 +46,47 @@ export class AudioQueueManager {
 			// Small delay between chunks for natural flow
 			await this.delay(100);
 			// Recursively play next chunk
-			this.playNext();
+			await this.playNext(); // Add await here!
 		} catch (error) {
 			console.error('❌ Audio playback error:', error);
 			// Continue with next chunk even on error
-			this.playNext();
+			await this.playNext(); // Add await here too!
 		}
 	}
 
-	/**
-	 * Play a single audio chunk
-	 */
+	// Play a single audio chunk
 	private playAudioChunk(audioBase64: string): Promise<void> {
 		return new Promise((resolve, reject) => {
+			console.log('🎵 Creating audio element...');
 			const audio = new Audio(`data:audio/wav;base64,${audioBase64}`);
 			audio.volume = 1.0;
 
 			this.currentAudio = audio;
 
 			audio.onended = () => {
+				console.log('✓ Audio chunk finished playing');
 				this.currentAudio = null;
 				resolve();
 			};
 
 			audio.onerror = (error) => {
 				this.currentAudio = null;
-				console.error('Audio element error:', error);
+				console.error('❌ Audio element error:', error);
 				reject(error);
 			};
 
-			audio.play().catch((error) => {
+			console.log('▶️ Calling audio.play()...');
+			audio.play().then(() => {
+				console.log('✓ Audio.play() started successfully');
+			}).catch((error) => {
 				this.currentAudio = null;
-				console.error('Audio play() error:', error);
+				console.error('❌ Audio play() error:', error);
 				reject(error);
 			});
 		});
 	}
 
-	/**
-	 * Stop current playback and clear queue
-	 */
+	// Stop current playback and clear queue
 	stop(): void {
 		console.log('⏹️ Stopping audio playback');
 
@@ -101,38 +102,28 @@ export class AudioQueueManager {
 		this.isPlaying = false;
 	}
 
-	/**
-	 * Clear queue without stopping current playback
-	 */
+	// Clear queue without stopping current playback
 	clearQueue(): void {
 		console.log('🗑️ Clearing audio queue');
 		this.queue = [];
 	}
 
-	/**
-	 * Check if currently playing
-	 */
+	// Check if currently playing
 	getIsPlaying(): boolean {
 		return this.isPlaying;
 	}
 
-	/**
-	 * Get current queue size
-	 */
+	// Get current queue size
 	getQueueSize(): number {
 		return this.queue.length;
 	}
 
-	/**
-	 * Set completion callback
-	 */
+	// Set completion callback
 	setOnComplete(callback: () => void): void {
 		this.onComplete = callback;
 	}
 
-	/**
-	 * Utility delay function
-	 */
+	// Utility delay function
 	private delay(ms: number): Promise<void> {
 		return new Promise(resolve => setTimeout(resolve, ms));
 	}

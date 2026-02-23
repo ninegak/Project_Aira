@@ -3,7 +3,7 @@ use llama_cpp::standard_sampler::StandardSampler;
 use llama_cpp::{LlamaModel, LlamaParams, LlamaSession, SessionParams};
 use std::time::Instant;
 
-/// Represents a single conversation turn
+// Represents a single conversation turn
 #[derive(Clone, Debug)]
 struct ConversationTurn {
     role: Role,
@@ -31,15 +31,15 @@ impl Role {
 pub struct LlmEngine {
     model: LlamaModel,
     session: LlamaSession,
-    /// Conversation history with token counts
+    // Conversation history with token counts
     history: Vec<ConversationTurn>,
-    /// Maximum context tokens (reserve space for response)
+    // Maximum context tokens (reserve space for response)
     max_context_tokens: usize,
-    /// System prompt that's always present
+    // System prompt that's always present
     system_prompt: String,
-    /// Base system prompt token count
+    // Base system prompt token count
     system_prompt_tokens: usize,
-    /// Current emotional context (injected into system prompt)
+    // Current emotional context (injected into system prompt)
     emotional_context: Option<String>,
 }
 
@@ -77,17 +77,17 @@ impl LlmEngine {
         })
     }
 
-    /// Update emotional context that will be injected into system prompt
+    // Update emotional context that will be injected into system prompt
     pub fn update_emotional_context(&mut self, context: &str) {
         self.emotional_context = Some(context.to_string());
     }
 
-    /// Clear emotional context
+    // Clear emotional context
     pub fn clear_emotional_context(&mut self) {
         self.emotional_context = None;
     }
 
-    /// Build the full system prompt with optional emotional context
+    // Build the full system prompt with optional emotional context
     fn build_system_prompt(&self) -> String {
         if let Some(emotion_ctx) = &self.emotional_context {
             format!(
@@ -99,20 +99,20 @@ impl LlmEngine {
         }
     }
 
-    /// Estimate token count for a string (rough approximation)
+    // Estimate token count for a string (rough approximation)
     fn estimate_tokens(&self, text: &str) -> usize {
         // More accurate: 4 chars per token average for English
         // Add buffer for formatting tokens
         (text.len() / 4) + 10
     }
 
-    /// Calculate total tokens used by conversation history
+    // Calculate total tokens used by conversation history
     fn total_history_tokens(&self) -> usize {
         self.history.iter().map(|turn| turn.token_count).sum()
     }
 
-    /// Prune old messages to fit within context window using sliding window
-    /// Keeps system prompt + most recent messages that fit
+    // Prune old messages to fit within context window using sliding window
+    // Keeps system prompt + most recent messages that fit
     fn prune_history_to_fit(&mut self, new_message_tokens: usize) {
         let system_tokens = self.system_prompt_tokens
             + self
@@ -149,7 +149,7 @@ impl LlmEngine {
         }
     }
 
-    /// Build the complete prompt from history
+    // Build the complete prompt from history
     fn build_prompt_from_history(&self, new_user_message: &str) -> String {
         let mut prompt = String::with_capacity(2048);
 
@@ -181,7 +181,7 @@ impl LlmEngine {
         prompt
     }
 
-    /// Optimized ask with conversation history and emotional context
+    // Optimized ask with conversation history and emotional context
     pub fn ask<F>(&mut self, user: &str, mut callback: F) -> Result<f64>
     where
         F: FnMut(&str) -> Result<()>,
@@ -264,18 +264,18 @@ impl LlmEngine {
         Ok(tps)
     }
 
-    /// Clear conversation history (keeps system prompt)
+    // Clear conversation history (keeps system prompt)
     pub fn clear_history(&mut self) {
         self.history.clear();
         println!("🔄 Conversation history cleared");
     }
 
-    /// Get conversation history length
+    // Get conversation history length
     pub fn history_length(&self) -> usize {
         self.history.len()
     }
 
-    /// Get total tokens in history
+    // Get total tokens in history
     pub fn history_tokens(&self) -> usize {
         self.total_history_tokens()
     }

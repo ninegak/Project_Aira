@@ -14,9 +14,9 @@ struct EmotionalStateTracker {
     previous_raw: Option<EmotionalContext>,
     // EMA alpha parameter (0.0-1.0, higher = more responsive)
     alpha: f32,
-    /// Minimum change threshold to trigger update (prevents jitter)
+    // Minimum change threshold to trigger update (prevents jitter)
     change_threshold: f32,
-    /// State machine for emotion transitions
+    // State machine for emotion transitions
     state_machine: EmotionStateMachine,
 }
 
@@ -35,7 +35,7 @@ struct EmotionStateMachine {
     current_state: EmotionState,
     state_duration: u64,  // How long in current state (seconds)
     last_transition: u64, // Timestamp of last state change
-    /// Minimum duration before allowing state change (prevents rapid flickering)
+    // Minimum duration before allowing state change (prevents rapid flickering)
     min_state_duration: u64,
 }
 
@@ -49,7 +49,7 @@ impl EmotionStateMachine {
         }
     }
 
-    /// Update state based on emotional metrics with hysteresis
+    // Update state based on emotional metrics with hysteresis
     fn update(&mut self, context: &EmotionalContext) -> EmotionState {
         let now = context.timestamp;
         self.state_duration = now.saturating_sub(self.last_transition);
@@ -84,7 +84,7 @@ impl EmotionStateMachine {
         self.current_state
     }
 
-    /// Determine target state from emotional context
+    // Determine target state from emotional context
     fn determine_state(&self, context: &EmotionalContext) -> EmotionState {
         // Priority order with hysteresis thresholds
         if context.fatigue > 0.7 {
@@ -102,7 +102,7 @@ impl EmotionStateMachine {
         }
     }
 
-    /// Calculate signal strength for a given state
+    // Calculate signal strength for a given state
     fn get_signal_strength(&self, context: &EmotionalContext, state: EmotionState) -> f32 {
         match state {
             EmotionState::Fatigued => context.fatigue,
@@ -137,7 +137,7 @@ impl EmotionalStateTracker {
         }
     }
 
-    /// Apply exponential moving average to smooth values
+    // Apply exponential moving average to smooth values
     fn apply_ema(&mut self, new_state: EmotionalContext) -> EmotionalContext {
         let alpha = self.alpha;
         let one_minus_alpha = 1.0 - alpha;
@@ -152,7 +152,7 @@ impl EmotionalStateTracker {
         }
     }
 
-    /// Check if change is significant enough to warrant update
+    // Check if change is significant enough to warrant update
     fn has_significant_change(&self, new_state: &EmotionalContext) -> bool {
         let diff = |a: f32, b: f32| (a - b).abs();
 
@@ -162,7 +162,7 @@ impl EmotionalStateTracker {
             || diff(new_state.positive_affect, self.current.positive_affect) > self.change_threshold
     }
 
-    /// Update with new emotional context, applying smoothing
+    // Update with new emotional context, applying smoothing
     fn update(&mut self, raw_state: EmotionalContext) -> Option<EmotionalContext> {
         // Apply EMA smoothing
         let smoothed = self.apply_ema(raw_state);
@@ -192,7 +192,7 @@ lazy_static::lazy_static! {
         Arc::new(Mutex::new(EmotionalStateTracker::new()));
 }
 
-/// Process camera features and return emotional state with rate limiting
+// Process camera features and return emotional state with rate limiting
 pub async fn process_camera_features(
     State((aira_state, _semaphore)): State<(SharedAira, &'static Semaphore)>,
     Json(features): Json<CameraFeatures>,
@@ -226,7 +226,7 @@ pub async fn process_camera_features(
     Json(final_state)
 }
 
-/// Log emotional state with visual indicators for real-time monitoring
+// Log emotional state with visual indicators for real-time monitoring
 fn log_emotional_state(features: &CameraFeatures, state: &EmotionalContext) {
     // Create visual bars (0-10 scale)
     let fatigue_bar = format!(
@@ -305,8 +305,8 @@ fn log_emotional_state(features: &CameraFeatures, state: &EmotionalContext) {
     println!("╚════════════════════════════════════════════════════════╝\n");
 }
 
-/// Calculate emotional state from camera features
-/// This is a privacy-preserving inference - no images, only numerical analysis
+// Calculate emotional state from camera features
+// This is a privacy-preserving inference - no images, only numerical analysis
 fn calculate_emotional_state(features: &CameraFeatures) -> EmotionalContext {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -377,7 +377,7 @@ fn calculate_emotional_state(features: &CameraFeatures) -> EmotionalContext {
     }
 }
 
-/// Get current emotional state (for prompt injection)
+// Get current emotional state (for prompt injection)
 #[allow(dead_code)]
 pub fn get_current_emotional_state(aira_state: &SharedAira) -> Option<EmotionalContext> {
     let guard = aira_state.lock().unwrap();
@@ -391,7 +391,7 @@ pub struct CameraStatusResponse {
     pub last_update: Option<u64>,
 }
 
-/// Get camera sensor status
+// Get camera sensor status
 pub async fn get_camera_status(
     State((aira_state, _semaphore)): State<(SharedAira, &'static Semaphore)>,
 ) -> Json<CameraStatusResponse> {
@@ -408,7 +408,7 @@ pub async fn get_camera_status(
     })
 }
 
-/// Detailed emotion response for real-time monitoring
+// Detailed emotion response for real-time monitoring
 #[derive(Serialize)]
 pub struct EmotionDetailsResponse {
     pub dominant_emotion: String,
@@ -420,7 +420,7 @@ pub struct EmotionDetailsResponse {
     pub smoothed: bool, // Indicates if values are smoothed
 }
 
-/// Get detailed emotional state with all metrics
+// Get detailed emotional state with all metrics
 pub async fn get_emotion_details(
     State((aira_state, _semaphore)): State<(SharedAira, &'static Semaphore)>,
 ) -> Json<EmotionDetailsResponse> {

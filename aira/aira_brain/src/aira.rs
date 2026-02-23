@@ -2,23 +2,23 @@ use crate::{llm::LlmEngine, stt::SttEngine, tts::TtsEngine};
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
 
-/// Emotional context for adaptive responses
+// Emotional context for adaptive responses
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct EmotionalContext {
-    /// Fatigue level (0.0 - 1.0)
+    // Fatigue level (0.0 - 1.0)
     pub fatigue: f32,
-    /// Engagement level (0.0 - 1.0)
+    // Engagement level (0.0 - 1.0)
     pub engagement: f32,
-    /// Stress/tension level (0.0 - 1.0)
+    // Stress/tension level (0.0 - 1.0)
     pub stress: f32,
-    /// Positive affect (0.0 - 1.0)
+    // Positive affect (0.0 - 1.0)
     pub positive_affect: f32,
-    /// Timestamp of last update
+    // Timestamp of last update
     pub timestamp: u64,
 }
 
 impl EmotionalContext {
-    /// Convert emotional context to human-readable format for LLM injection
+    // Convert emotional context to human-readable format for LLM injection
     pub fn to_llm_context(&self) -> String {
         let dominant_emotion = self.get_dominant_emotion();
         let recommendations = self.get_recommendations();
@@ -41,7 +41,7 @@ impl EmotionalContext {
         )
     }
 
-    /// Get dominant emotion as a string
+    // Get dominant emotion as a string
     fn get_dominant_emotion(&self) -> &'static str {
         if self.fatigue > 0.7 {
             "fatigued and low-energy"
@@ -58,7 +58,7 @@ impl EmotionalContext {
         }
     }
 
-    /// Get confidence level of emotional detection
+    // Get confidence level of emotional detection
     fn get_confidence(&self) -> f32 {
         // Higher variance in metrics = lower confidence
         let values = [
@@ -74,7 +74,7 @@ impl EmotionalContext {
         (1.0 - variance).clamp(0.5, 1.0)
     }
 
-    /// Get recommendations for interaction style
+    // Get recommendations for interaction style
     fn get_recommendations(&self) -> &'static str {
         if self.fatigue > 0.7 {
             "Be supportive and gentle. Suggest taking a break if appropriate. Keep responses concise."
@@ -137,29 +137,29 @@ impl Aira {
         self.tts.synthesize(text)
     }
 
-    /// Get a clone of the TTS engine for concurrent synthesis
+    // Get a clone of the TTS engine for concurrent synthesis
     pub fn get_tts(&self) -> TtsEngine {
         self.tts.clone()
     }
 
-    /// Update emotional context from camera features
+    // Update emotional context from camera features
     pub fn update_emotional_context(&self, context: EmotionalContext) {
         if let Ok(mut guard) = self.emotional_context.lock() {
             *guard = Some(context);
         }
     }
 
-    /// Get current emotional context
+    // Get current emotional context
     pub fn get_emotional_context(&self) -> Option<EmotionalContext> {
         self.emotional_context.lock().ok()?.clone()
     }
 
-    /// Clear conversation history (useful when starting new conversation)
+    // Clear conversation history (useful when starting new conversation)
     pub fn clear_history(&mut self) {
         self.llm.clear_history();
     }
 
-    /// Get conversation statistics
+    // Get conversation statistics
     pub fn get_conversation_stats(&self) -> (usize, usize) {
         (self.llm.history_length(), self.llm.history_tokens())
     }

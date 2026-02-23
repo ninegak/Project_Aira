@@ -52,73 +52,170 @@ Aira consists of three main components:
 
 ### Prerequisites
 
-- **Rust** (1.70+) with Cargo
-- **Node.js** (18+) with npm
-- **FFmpeg** (for audio conversion)
+- **Rust** (1.70+) with Cargo - [Install](https://www.rust-lang.org/tools/install)
+- **Node.js** (18+) with npm - [Install](https://nodejs.org/)
+- **FFmpeg** (for audio conversion) - See platform-specific instructions below
 - **CUDA** (optional, for GPU acceleration)
 
-### 1. Clone the Repository
+### 💻 Platform-Specific Installation
 
+<details>
+<summary><b>🐧 Linux / macOS</b></summary>
+
+#### Install FFmpeg:
 ```bash
+# Ubuntu/Debian
+sudo apt-get update && sudo apt-get install -y ffmpeg
+
+# Fedora
+sudo dnf install -y ffmpeg
+
+# macOS (with Homebrew)
+brew install ffmpeg
+
+# Arch Linux
+sudo pacman -S ffmpeg
+```
+
+#### Run installer:
+```bash
+git clone https://github.com/yourusername/aira.git
+cd aira
+./install.sh
+```
+</details>
+
+<details>
+<summary><b>🪟 Windows</b></summary>
+
+#### 1. Install Prerequisites
+
+**FFmpeg:**
+```powershell
+# Using winget (Windows 10/11)
+winget install Gyan.FFmpeg
+
+# Or download manually from https://ffmpeg.org/download.html
+# Extract to C:\ffmpeg and add C:\ffmpeg\bin to your PATH
+```
+
+**Rust:**
+Download and run the installer from https://rustup.rs/
+
+**Node.js:**
+Download from https://nodejs.org/ (LTS version recommended)
+
+#### 2. Clone Repository
+```powershell
 git clone https://github.com/yourusername/aira.git
 cd aira
 ```
 
-### 2. Download AI Models
+#### 3. Download Models Manually
 
-Create the models directory and download the required models:
+Since the install script is bash-based, Windows users need to download models manually:
 
-```bash
-mkdir -p aira/models
-mkdir -p aira/tts_models
+```powershell
+# Create directories
+mkdir -p aira\models
+mkdir -p aira\tts_models
 
-# Download Whisper model (Small English)
-wget -O aira/models/ggml-small.en-q5_1.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en-q5_1.bin
+# Download Whisper model (using PowerShell)
+Invoke-WebRequest -Uri "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en-q5_1.bin" -OutFile "aira\models\ggml-small.en-q5_1.bin"
 
 # Download LLM model (Qwen2.5 3B)
-wget -O aira/models/qwen2.5-3b-instruct-q4_0.gguf \
-  https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_0.gguf
+Invoke-WebRequest -Uri "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_0.gguf" -OutFile "aira\models\qwen2.5-3b-instruct-q4_0.gguf"
 
 # Download Piper TTS model
-wget -O aira/tts_models/en_US-hfc_female-medium.onnx \
-  https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx
+Invoke-WebRequest -Uri "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx" -OutFile "aira\tts_models\en_US-hfc_female-medium.onnx"
 
-wget -O aira/tts_models/en_US-hfc_female-medium.onnx.json \
-  https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx.json
+Invoke-WebRequest -Uri "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx.json" -OutFile "aira\tts_models\en_US-hfc_female-medium.onnx.json"
 ```
 
-### 3. Build & Run Backend
+#### 4. Build & Run
 
-```bash
+```powershell
+# Build backend
 cd aira
-
-# Build release version
 cargo build --release
 
-# Start the server
-./target/release/aira_server
-```
-
-The server will start on `http://127.0.0.1:3000`
-
-### 4. Build & Run Frontend
-
-```bash
-cd aira/frontend
-
-# Install dependencies
+# Install frontend dependencies
+cd frontend
 npm install
 
-# Start development server
+# Start servers (in separate terminals)
+# Terminal 1 - Backend:
+cd aira
+.\target\release\aira_server.exe
+
+# Terminal 2 - Frontend:
+cd aira\frontend
 npm run dev
 ```
 
-The frontend will be available at `http://localhost:5173`
+Then open your browser to http://localhost:5173
+</details>
 
-### 5. Start Chatting!
+### ⚡ One-Line Install (Linux/macOS only)
 
-Open your browser to `http://localhost:5173` and click **"Start Chatting"** to begin!
+```bash
+git clone https://github.com/yourusername/aira.git && cd aira && ./install.sh
+```
+
+This will:
+1. ✅ Check all prerequisites
+2. 📥 Download all AI models (~3GB)
+3. 🔨 Build the Rust backend
+4. 📦 Install frontend dependencies
+5. 🎉 Set up everything for you!
+
+### 🚀 Run Aira
+
+**Linux/macOS:**
+```bash
+# Option 1: Web UI (Recommended)
+./aira-serve
+
+# Option 2: CLI Version
+cd aira && cargo run --release
+```
+
+**Windows:**
+```powershell
+# Option 1: Web UI (Recommended)
+.\aira-serve.bat
+
+# Option 2: CLI Version
+cd aira
+.\target\release\aira_server.exe
+```
+
+Then open your browser to **http://localhost:5173**
+
+**Note:** First startup will take a few minutes as models are loaded into memory.
+
+### 📋 Manual Setup (Alternative)
+
+If you prefer manual setup:
+
+```bash
+# 1. Clone
+git clone https://github.com/yourusername/aira.git
+cd aira
+
+# 2. Download models (see install.sh for URLs)
+mkdir -p aira/models aira/tts_models
+# Download: Whisper, Qwen2.5, Piper TTS
+
+# 3. Build
+cd aira
+cargo build --release
+cd frontend && npm install && npm run build
+
+# 4. Run
+./target/release/aira_server  # Terminal 1
+cd frontend && npm run dev    # Terminal 2
+```
 
 ## 📖 Usage
 

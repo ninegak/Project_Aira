@@ -3,7 +3,7 @@ use piper_rs::{self, synth::PiperSpeechSynthesizer};
 use std::path::Path;
 use std::sync::Arc;
 
-/// Thread-safe TTS engine using Arc for shared ownership
+// Thread-safe TTS engine using Arc for shared ownership
 #[derive(Clone)]
 pub struct TtsEngine {
     tts: Arc<PiperSpeechSynthesizer>,
@@ -16,8 +16,8 @@ impl TtsEngine {
         Ok(Self { tts: Arc::new(tts) })
     }
 
-    /// Synthesize text to audio samples
-    /// Returns f32 samples at 22050 Hz
+    // Synthesize text to audio samples
+    // Returns f32 samples at 22050 Hz
     pub fn synthesize(&self, text: &str) -> Result<Vec<f32>> {
         let chunks = self.tts.synthesize_parallel(text.to_string(), None)?;
         let mut samples = Vec::new();

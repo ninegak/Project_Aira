@@ -10,7 +10,7 @@ pub struct TtsRequest {
     pub text: String,
 }
 
-/// Camera features sent from frontend for emotion detection
+// Camera features sent from frontend for emotion detection
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct CameraFeatures {
     pub face_present: bool,

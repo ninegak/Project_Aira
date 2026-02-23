@@ -10,14 +10,14 @@ use std::io::Cursor;
 use std::process::Command;
 use tokio::sync::Semaphore;
 
-/// STT transcription response
+// STT transcription response
 #[derive(Serialize)]
 pub struct TranscribeResponse {
     pub text: String,
     pub confidence: f32,
 }
 
-/// Transcribe audio to text using Whisper STT with rate limiting
+// Transcribe audio to text using Whisper STT with rate limiting
 pub async fn transcribe_audio(
     State((aira_state, _semaphore)): State<(SharedAira, &'static Semaphore)>,
     mut multipart: Multipart,
@@ -70,8 +70,8 @@ pub async fn transcribe_audio(
     }
 }
 
-/// Decode audio bytes to f32 samples
-/// Tries multiple methods: WAV, FFmpeg conversion
+// Decode audio bytes to f32 samples
+// Tries multiple methods: WAV, FFmpeg conversion
 async fn decode_audio(audio_data: &[u8]) -> anyhow::Result<Vec<f32>> {
     // Try WAV first (simplest)
     if audio_data.starts_with(b"RIFF") {
@@ -84,7 +84,7 @@ async fn decode_audio(audio_data: &[u8]) -> anyhow::Result<Vec<f32>> {
     decode_with_ffmpeg(audio_data).await
 }
 
-/// Decode WAV file to f32 samples
+// Decode WAV file to f32 samples
 fn decode_wav(audio_data: &[u8]) -> anyhow::Result<Vec<f32>> {
     let cursor = Cursor::new(audio_data);
     let mut reader = hound::WavReader::new(cursor)?;
@@ -102,7 +102,7 @@ fn decode_wav(audio_data: &[u8]) -> anyhow::Result<Vec<f32>> {
     Ok(samples)
 }
 
-/// Use FFmpeg to convert webm/opus to WAV, then decode
+// Use FFmpeg to convert webm/opus to WAV, then decode
 async fn decode_with_ffmpeg(audio_data: &[u8]) -> anyhow::Result<Vec<f32>> {
     // Create unique temporary files to avoid collisions
     let timestamp = std::time::SystemTime::now()

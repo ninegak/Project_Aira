@@ -13,7 +13,52 @@ use std::time::Duration;
 use tokio::sync::{Semaphore, mpsc};
 use tokio::time::timeout;
 
-/// Chat endpoint with semaphore-based rate limiting to prevent memory corruption
+// Remove markdown formatting artifacts from LLM output
+fn clean_llm_output(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '*' => {
+                // Check if it's a double asterisk (bold)
+                if chars.peek() == Some(&'*') {
+                    chars.next(); // Skip the second asterisk
+                    continue; // Don't add either asterisk
+                }
+                // Check if it's a bullet point (asterisk at start of line or after space)
+                else if result.is_empty() || result.ends_with('\n') || result.ends_with(' ') {
+                    result.push('•'); // Convert to bullet point
+                    // Skip the space after asterisk if present
+                    if chars.peek() == Some(&' ') {
+                        chars.next();
+                        result.push(' ');
+                    }
+                }
+                // Otherwise it's an italic marker, skip it
+                else {
+                    continue;
+                }
+            }
+            '_' => {
+                // Check if it's a double underscore (bold)
+                if chars.peek() == Some(&'_') {
+                    chars.next(); // Skip the second underscore
+                    continue; // Don't add either underscore
+                }
+                // Otherwise it's an italic marker, skip it
+                else {
+                    continue;
+                }
+            }
+            _ => result.push(c),
+        }
+    }
+
+    result
+}
+
+// Chat endpoint with semaphore-based rate limiting to prevent memory corruption
 pub async fn chat(
     State((aira_state, semaphore)): State<(SharedAira, &'static Semaphore)>,
     Json(req): Json<ChatRequest>,
@@ -57,7 +102,6 @@ pub async fn chat(
         let (tts_tx, mut tts_rx) = mpsc::channel::<String>(32);
 
         // Spawn TTS worker that processes chunks sequentially (not concurrently)
-        // This prevents memory corruption from concurrent TTS synthesis
         let event_tx_tts = event_tx.clone();
         let tts_worker_handle = tokio::spawn(async move {
             while let Some(text_chunk) = tts_rx.recv().await {
@@ -102,12 +146,15 @@ pub async fn chat(
                 let mut guard = aira_state.lock().unwrap();
 
                 guard.think(&message, |token: &str| {
-                    // Send token immediately
-                    let _ =
-                        event_tx_llm.blocking_send(Ok(Event::default().data(token.to_string())));
+                    // Clean markdown formatting from token
+                    let cleaned_token = clean_llm_output(token);
 
-                    // Buffer for sentence detection
-                    sentence_buffer.push_str(token);
+                    // Send cleaned token immediately
+                    let _ = event_tx_llm
+                        .blocking_send(Ok(Event::default().data(cleaned_token.clone())));
+
+                    // Buffer for sentence detection (use original token for detection)
+                    sentence_buffer.push_str(&cleaned_token);
 
                     // Send to TTS on sentence boundaries
                     if sentence_buffer.ends_with('.')
@@ -152,7 +199,6 @@ pub async fn chat(
         }
 
         // Wait for TTS worker to finish processing all queued chunks
-        // This ensures all audio is sent before closing the stream
         println!("Waiting for TTS worker to complete...");
         if let Err(e) = tokio::time::timeout(Duration::from_secs(15), tts_worker_handle).await {
             eprintln!("TTS worker timed out or failed: {:?}", e);
@@ -168,7 +214,7 @@ pub async fn chat(
     Sse::new(stream)
 }
 
-/// Optimized WAV creation and base64 encoding in a single pass
+// Optimized WAV creation and base64 encoding in a single pass
 fn samples_to_base64_wav(samples: Vec<f32>) -> anyhow::Result<String> {
     use base64::{Engine as _, engine::general_purpose};
     use hound::{SampleFormat, WavSpec, WavWriter};
