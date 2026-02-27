@@ -5,7 +5,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 
-Aira is a **privacy-first, voice-enabled AI assistant** that runs entirely on your local machine. Speak naturally to interact with a powerful language model, with optional emotion-aware responses using your camera.
+Aira is a **privacy-first, voice-enabled AI assistant** that runs entirely on your local machine. Speak naturally to interact with a powerful language model, with optional emotion-aware responses using your camera this is my personal projects mostly vibe-coded i'll try my best to improve it one day.
 
 ![Aira Demo](docs/demo.png)
 
