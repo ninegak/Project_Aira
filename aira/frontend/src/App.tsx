@@ -8,6 +8,7 @@ import Sidebar from './components/Sidebar';
 import Chat from './components/Chat';
 import Landing from './components/Landing';
 import CameraSensor from './components/CameraSensor';
+import EyeVisualization from './components/EyeVisualization';
 import PrivacyModal from './components/PrivacyModal';
 import './App.css';
 
@@ -47,6 +48,7 @@ function App() {
 	const [voiceModeEnabled, setVoiceModeEnabled] = useState<boolean>(false);
 	const [isVoiceRecording, setIsVoiceRecording] = useState<boolean>(false);
 	const [isCameraFullscreen, setIsCameraFullscreen] = useState<boolean>(false);
+	const [displayMode, setDisplayMode] = useState<'eyes' | 'camera'>('eyes');
 	const voiceRecorderRef = useRef<MediaRecorder | null>(null);
 	const voiceChunksRef = useRef<Blob[]>([]);
 
@@ -224,8 +226,18 @@ function App() {
 	}, []);
 
 	const toggleVoiceMode = useCallback(() => {
-		setVoiceModeEnabled((prev) => !prev);
-	}, []);
+		setVoiceModeEnabled((prev) => {
+			const newValue = !prev;
+			if (!newValue) {
+				// Turning off voice mode - stop recording and clear flag
+				shouldAutoRestartRef.current = false;
+				if (voiceRecorderRef.current && isVoiceRecording) {
+					voiceRecorderRef.current.stop();
+				}
+			}
+			return newValue;
+		});
+	}, [isVoiceRecording]);
 
 	const toggleCameraFullscreen = useCallback(() => {
 		setIsCameraFullscreen((prev) => !prev);
@@ -396,13 +408,6 @@ function App() {
 					stream.getTracks().forEach((track) => track.stop());
 					setIsVoiceRecording(false);
 
-					// Auto-restart recording in live mode if still enabled
-					if (voiceModeEnabled && cameraEnabled) {
-						console.log('🔄 Auto-restarting voice recording');
-						setTimeout(() => {
-							startVoiceRecording();
-						}, 500);
-					}
 				}
 			};
 
@@ -415,6 +420,7 @@ function App() {
 	}, [cameraEnabled, voiceModeEnabled, handleVoiceMessage]);
 
 	const stopVoiceRecording = useCallback(() => {
+		shouldAutoRestartRef.current = false; // Disable auto-restart
 		if (voiceRecorderRef.current && isVoiceRecording) {
 			voiceRecorderRef.current.stop();
 		}
@@ -609,6 +615,21 @@ function App() {
 			try {
 				const state = await sendCameraFeatures(features);
 				setEmotionalState(state);
+
+				// Determine dominant emotion from state
+				let dominantEmotion = 'neutral';
+				if (state.fatigue > 0.7) {
+					dominantEmotion = 'fatigued';
+				} else if (state.stress > 0.6) {
+					dominantEmotion = 'stressed';
+				} else if (state.positive_affect > 0.6) {
+					dominantEmotion = 'happy';
+				} else if (state.engagement > 0.7) {
+					dominantEmotion = 'focused';
+				} else if (state.engagement < 0.3) {
+					dominantEmotion = 'disengaged';
+				}
+				setEmotion(dominantEmotion);
 			} catch (error) {
 				console.error('Error sending camera features:', error);
 			}
@@ -692,7 +713,9 @@ function App() {
 					darkMode={darkMode}
 					playingMessageIndex={playingMessageIndex}
 					cameraEnabled={cameraEnabled}
+					displayMode={displayMode}
 					onToggleCamera={toggleCamera}
+					onToggleDisplayMode={() => setDisplayMode(displayMode === 'eyes' ? 'camera' : 'eyes')}
 				/>
 			</div>
 			<PrivacyModal
@@ -703,19 +726,33 @@ function App() {
 			/>
 
 			{cameraEnabled && (
-				<CameraSensor
-					enabled={cameraEnabled}
-					darkMode={darkMode}
-					onFeaturesUpdate={handleCameraFeatures}
-					isVoiceMode={voiceModeEnabled}
-					onVoiceStart={startVoiceRecording}
-					onVoiceStop={stopVoiceRecording}
-					isFullscreen={isCameraFullscreen}
-					onToggleFullscreen={toggleCameraFullscreen}
-					onClose={closeCamera}
-					isProcessing={loading}
-					isSpeaking={isSpeaking}
-				/>
+				<>
+					{displayMode === 'eyes' ? (
+						<EyeVisualization
+							emotion={emotion}
+							darkMode={darkMode}
+							onClose={closeCamera}
+							onToggleDisplayMode={() => setDisplayMode('camera')}
+							isSpeaking={isSpeaking}
+							isRecording={isRecording}
+							isProcessing={loading}
+							onVoiceStart={startVoiceRecording}
+							onVoiceStop={stopVoiceRecording}
+						/>
+					) : (
+						<CameraSensor
+							darkMode={darkMode}
+							onClose={closeCamera}
+							onToggleDisplayMode={() => setDisplayMode('eyes')}
+							isSpeaking={isSpeaking}
+							isRecording={isRecording}
+							isProcessing={loading}
+							onVoiceStart={startVoiceRecording}
+							onVoiceStop={stopVoiceRecording}
+							onFeaturesUpdate={handleCameraFeatures}
+						/>
+					)}
+				</>
 			)}
 		</div>
 	);
