@@ -14,10 +14,21 @@ Aira is a **privacy-first, voice-enabled AI assistant** that runs entirely on yo
 - 🎙️ **Voice-First Interface** - Just speak naturally, no typing required
 - 🔒 **100% Local & Private** - All AI models run on your device, no data leaves your machine
 - 📷 **Emotion-Aware** (Optional) - Camera detects your emotional state to adapt responses
+- 🤖 **Robot Eye Visualization** - Toggle between seeing yourself or animated robot eyes that react to Aira's responses
 - ⚡ **Lightning Fast** - Local LLM inference for instant responses
 - 🎨 **Beautiful UI** - Modern, responsive interface with dark/light mode
 - 💬 **Chat History** - Conversations are saved locally
 - 🎙️ **Text-to-Speech** - Aira speaks responses back to you
+
+### Robot Eye Visualization
+
+When you enable the camera, you can choose between:
+
+1. **Vision Mode** - See your own camera feed with face detection
+2. **Eyes Mode** (Default) - Animated robot eyes that display:
+   - **Happy** - When Aira is speaking or processing
+   - **Neutral** - With random blinking and eye movement when idle
+   - Can toggle back and forth between views anytime
 
 ### How Emotion Detection Works
 
@@ -264,9 +275,11 @@ cd frontend && npm run dev    # Terminal 2
 ### Voice Mode
 
 1. Click the **camera icon** in the input area to enable camera
-2. Grant microphone access when prompted
-3. Speak naturally - Aira will transcribe and respond
-4. Toggle **Live Mode** for continuous conversation
+2. Grant camera access when prompted (required for face detection)
+3. Choose **Eyes Mode** (default) to see animated robot eyes, or **Vision Mode** to see yourself
+4. Tap the microphone button to record and speak
+5. Toggle between eyes and camera view anytime using the buttons at top right
+6. Aira's eyes will turn happy while she's responding
 
 ### Text Mode
 
@@ -274,9 +287,12 @@ cd frontend && npm run dev    # Terminal 2
 2. Press **Enter** or click the send button
 3. Aira will respond with text and optional voice
 
-### Camera & Emotion Detection
+### Camera & Eye Visualization
 
 - Camera is **completely optional** - Aira works great without it
+- **Eyes Mode** (default): Animated robot eyes show Aira's state - happy when she's responding, neutral otherwise
+- **Vision Mode**: See your own camera feed with face detection metrics
+- Toggle between modes using buttons at the top right
 - If enabled, only numerical emotion data is sent (fatigue, engagement, stress)
 - No video or images are ever transmitted
 - All processing happens locally in your browser
@@ -312,7 +328,8 @@ aira/
 │       │   ├── Landing.tsx
 │       │   ├── Chat.tsx
 │       │   ├── Sidebar.tsx
-│       │   ├── CameraSensor.tsx
+│       │   ├── CameraSensor.tsx    # Camera feed with face detection
+│       │   ├── EyeVisualization.tsx # Animated robot eyes
 │       │   └── PrivacyModal.tsx
 │       └── api/
 │           ├── chatAPI.ts

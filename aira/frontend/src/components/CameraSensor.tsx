@@ -3,43 +3,51 @@ import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 import type { CameraFeatures } from '../types/camera';
 
 interface CameraSensorProps {
-	onFeaturesUpdate?: (features: CameraFeatures) => void;
+	darkMode?: boolean;
+	onClose?: () => void;
+	onToggleDisplayMode?: () => void;
+	isSpeaking?: boolean;
+	isRecording?: boolean;
+	isProcessing?: boolean;
 	onVoiceStart?: () => void;
 	onVoiceStop?: () => void;
-	darkMode?: boolean;
-	enabled?: boolean;
-	isFullscreen?: boolean;
-	onClose?: () => void;
-	isProcessing?: boolean;
-	isSpeaking?: boolean;
+	onFeaturesUpdate?: (features: CameraFeatures) => void;
 }
 
 const CameraSensor: React.FC<CameraSensorProps> = ({
-	onFeaturesUpdate,
+	darkMode = false,
+	onClose,
+	onToggleDisplayMode,
+	isSpeaking = false,
+	isRecording = false,
+	isProcessing = false,
 	onVoiceStart,
 	onVoiceStop,
-	darkMode = false,
-	enabled = true,
-	isFullscreen = false,
-	onClose,
-	isProcessing = false,
-	isSpeaking = false,
+	onFeaturesUpdate,
 }) => {
+	const [localIsRecording, setLocalIsRecording] = useState(false);
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const faceLandmarkerRef = useRef<FaceLandmarker | null>(null);
 	const streamRef = useRef<MediaStream | null>(null);
 	const animationFrameRef = useRef<number>(0);
 	const lastVideoTimeRef = useRef<number>(-1);
-
-	const [isLoading, setIsLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	const [cameraReady, setCameraReady] = useState(false);
 	const [faceDetected, setFaceDetected] = useState(false);
 	const [debugInfo, setDebugInfo] = useState<string>('Initializing...');
-	const [isRecording, setIsRecording] = useState(false);
-	const [cameraReady, setCameraReady] = useState(false);
 
-	// Calculate facial features from landmarks
+	const handleVoiceToggle = () => {
+		if (localIsRecording) {
+			setLocalIsRecording(false);
+			onVoiceStop?.();
+		} else {
+			setLocalIsRecording(true);
+			onVoiceStart?.();
+		}
+	};
+
+	const effectiveIsRecording = isRecording || localIsRecording;
+
 	const calculateFeatures = useCallback((result: any): CameraFeatures | null => {
 		if (!result.faceLandmarks || result.faceLandmarks.length === 0) {
 			return null;
@@ -48,7 +56,6 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 		const landmarks = result.faceLandmarks[0];
 		const blendshapes = result.faceBlendshapes?.[0]?.categories || [];
 
-		// Eye openness calculation
 		const leftEyeTop = landmarks[159];
 		const leftEyeBottom = landmarks[145];
 		const leftEyeLeft = landmarks[33];
@@ -99,7 +106,6 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 		};
 	}, []);
 
-	// Use refs to avoid dependency issues
 	const faceDetectedRef = useRef(faceDetected);
 	faceDetectedRef.current = faceDetected;
 	const calculateFeaturesRef = useRef(calculateFeatures);
@@ -107,10 +113,8 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 	const onFeaturesUpdateRef = useRef(onFeaturesUpdate);
 	onFeaturesUpdateRef.current = onFeaturesUpdate;
 
-	// Store predictWebcam in ref so init can access it without being dependency
-	const predictWebcamRef = useRef<() => void>(() => { });
+	const predictWebcamRef = useRef<() => void>(() => {});
 
-	// Process video frames
 	const predictWebcam = useCallback(() => {
 		if (!videoRef.current || !canvasRef.current) {
 			animationFrameRef.current = requestAnimationFrame(predictWebcam);
@@ -120,7 +124,6 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 		const video = videoRef.current;
 		const faceLandmarker = faceLandmarkerRef.current;
 
-		// Check if video has new frame
 		if (video.currentTime !== lastVideoTimeRef.current) {
 			lastVideoTimeRef.current = video.currentTime;
 
@@ -129,17 +132,16 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 					const startTimeMs = performance.now();
 					const result = faceLandmarker.detectForVideo(video, startTimeMs);
 
-					// Update face detection state using ref to check current value
 					const hasFace = result.faceLandmarks && result.faceLandmarks.length > 0;
 					if (hasFace !== faceDetectedRef.current) {
 						setFaceDetected(hasFace);
 					}
 
-					// Calculate and send features using refs
 					if (hasFace) {
 						const features = calculateFeaturesRef.current(result);
 						if (features) {
 							onFeaturesUpdateRef.current?.(features);
+							console.log('Camera features:', features);
 						}
 					}
 				} catch (err) {
@@ -151,28 +153,14 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 		animationFrameRef.current = requestAnimationFrame(predictWebcam);
 	}, []);
 
-	// Store the function in ref so init can access it
 	predictWebcamRef.current = predictWebcam;
 
-	// Initialize camera
 	useEffect(() => {
-		if (!enabled) return;
-
-		setDebugInfo('Requesting camera');
-		setIsLoading(true);
-		setError(null);
-		setCameraReady(false);
-
-		let isActive = true;
 		let stream: MediaStream | null = null;
-		let timeoutId: ReturnType<typeof setTimeout>;
 
-		const init = async () => {
+		const initCamera = async () => {
 			try {
-				// First get camera access
-				console.log('CameraSensor: Getting user media');
 				setDebugInfo('Accessing camera...');
-
 				stream = await navigator.mediaDevices.getUserMedia({
 					video: {
 						width: { ideal: 640, min: 320 },
@@ -180,304 +168,89 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 						facingMode: 'user',
 					},
 					audio: false,
-				}).catch((err) => {
-					// Specific error messages
-					if (err.name === 'NotAllowedError') {
-						throw new Error('Camera permission denied. Please allow camera access.');
-					} else if (err.name === 'NotFoundError') {
-						throw new Error('No camera found on this device.');
-					} else if (err.name === 'NotReadableError') {
-						throw new Error('Camera is already in use by another application.');
-					} else if (err.name === 'SecurityError') {
-						throw new Error('Camera access requires HTTPS or localhost.');
-					}
-					throw err;
 				});
-				if (!isActive) {
-					stream.getTracks().forEach((track) => track.stop());
-					return;
-				}
 
-				console.log('CameraSensor: Got stream with', stream.getVideoTracks().length, 'video tracks');
 				streamRef.current = stream;
 
-				const videoTrack = stream.getVideoTracks()[0];
-				if (videoTrack) {
-					console.log('CameraSensor: Video track settings:', videoTrack.getSettings());
-				}
+				if (videoRef.current) {
+					videoRef.current.srcObject = stream;
+					videoRef.current.onloadedmetadata = async () => {
+						await videoRef.current?.play();
+						setCameraReady(true);
+						setDebugInfo('Loading face model...');
 
-				// Set stream to video element
-				const video = videoRef.current;
-				if (video) {
-					console.log('CameraSensor: Setting srcObject to video element');
-					video.srcObject = stream;
+						try {
+							const filesetResolver = await FilesetResolver.forVisionTasks(
+								'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
+							);
 
-					// Wait for video to be ready with timeout
-					let metadataLoaded = false;
-
-					const checkVideoReady = () => {
-						if (!isActive) return;
-
-						console.log('CameraSensor: Checking video ready - readyState:', video.readyState);
-
-						// readyState >= 2 means HAVE_CURRENT_DATA or better
-						if (video.readyState >= 2 && !metadataLoaded) {
-							metadataLoaded = true;
-							console.log('CameraSensor: Video has data, attempting play...');
-							setDebugInfo('Starting video...');
-
-							video.play().then(() => {
-								if (!isActive) return;
-								console.log('CameraSensor: Video playing successfully');
-								setDebugInfo('Camera active');
-								setCameraReady(true);
-								setIsLoading(false);
-
-								// Start face detection loop
-								predictWebcamRef.current?.();
-							}).catch((err) => {
-								if (!isActive) return;
-								console.error('CameraSensor: Play error:', err);
-								setError('Failed to play video: ' + err.message);
-								setDebugInfo('Play error: ' + err.message);
-								setIsLoading(false);
+							const faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+								baseOptions: {
+									modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+									delegate: 'GPU',
+								},
+								outputFaceBlendshapes: true,
+								outputFacialTransformationMatrixes: true,
+								runningMode: 'VIDEO',
+								numFaces: 1,
 							});
-						} else if (!metadataLoaded) {
-							// Poll again in 100ms
-							timeoutId = setTimeout(checkVideoReady, 100);
+
+							faceLandmarkerRef.current = faceLandmarker;
+							setDebugInfo('Face detection active');
+							predictWebcamRef.current?.();
+						} catch (err) {
+							console.error('Failed to load face landmarker:', err);
+							setDebugInfo('Camera active (no face detection)');
 						}
 					};
-
-					// Also listen to events as backup
-					video.onloadedmetadata = () => {
-						console.log('CameraSensor: onloadedmetadata fired');
-						if (!metadataLoaded) {
-							checkVideoReady();
-						}
-					};
-
-					video.onloadeddata = () => {
-						console.log('CameraSensor: onloadeddata fired');
-						if (!metadataLoaded) {
-							checkVideoReady();
-						}
-					};
-
-					video.onerror = (err) => {
-						console.error('CameraSensor: Video error:', err);
-						setError('Video element error');
-						setDebugInfo('Video error occurred');
-						setIsLoading(false);
-					};
-
-					// Start checking
-					checkVideoReady();
-
-					// Timeout fallback after 10 seconds
-					setTimeout(() => {
-						if (isActive && !metadataLoaded) {
-							console.error('CameraSensor: Timeout waiting for video');
-							setError('Camera timeout - video not starting');
-							setDebugInfo('Timeout: readyState=' + video.readyState);
-							setIsLoading(false);
-						}
-					}, 10000);
-				} else {
-					console.error('CameraSensor: Video ref is null');
-					setError('Video element not found');
-					setDebugInfo('Video ref null');
-					setIsLoading(false);
 				}
-			} catch (err: any) {
-				console.error('CameraSensor: Error:', err);
-				setError(err.message || 'Camera access failed');
-				setDebugInfo('Error: ' + (err.message || 'Unknown error'));
-				setIsLoading(false);
+			} catch (err) {
+				console.error('Camera error:', err);
+				setDebugInfo('Camera error');
 			}
 		};
 
-		// Delay to ensure DOM is ready, then check if video ref exists
-		const initTimeout = setTimeout(() => {
-			if (videoRef.current) {
-				init();
-			} else {
-				console.log('CameraSensor: Video ref not ready, retrying...');
-				setDebugInfo('Waiting for video element...');
-				// Retry after a short delay
-				setTimeout(() => {
-					if (videoRef.current && isActive) {
-						init();
-					} else if (isActive) {
-						console.error('CameraSensor: Video ref still null after retry');
-						setError('Video element not found');
-						setDebugInfo('Video ref null - DOM issue');
-						setIsLoading(false);
-					}
-				}, 500);
-			}
-		}, 100);
+		initCamera();
 
 		return () => {
-			isActive = false;
-			clearTimeout(initTimeout);
-			clearTimeout(timeoutId);
-			console.log('CameraSensor: Cleaning up...');
-
+			stream?.getTracks().forEach(track => track.stop());
 			if (animationFrameRef.current) {
 				cancelAnimationFrame(animationFrameRef.current);
 			}
-
-			stream?.getTracks().forEach((track) => track.stop());
-
-			const video = videoRef.current;
-			if (video) {
-				video.srcObject = null;
-				video.onloadedmetadata = null;
-				video.onloadeddata = null;
-				video.onerror = null;
-			}
 		};
-	}, [enabled]); // Removed predictWebcam from deps to prevent re-renders
+	}, []);
 
-	// Load face landmarker after camera is ready
-	useEffect(() => {
-		if (!cameraReady) return;
-
-		let isActive = true;
-
-		const loadModel = async () => {
-			try {
-				setDebugInfo('Loading face model...');
-
-				const filesetResolver = await FilesetResolver.forVisionTasks(
-					'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
-				);
-
-				if (!isActive) return;
-
-				const faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
-					baseOptions: {
-						modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-						delegate: 'GPU',
-					},
-					outputFaceBlendshapes: true,
-					outputFacialTransformationMatrixes: true,
-					runningMode: 'VIDEO',
-					numFaces: 1,
-				});
-
-				if (!isActive) return;
-
-				faceLandmarkerRef.current = faceLandmarker;
-				console.log('Face Landmarker loaded successfully');
-				setDebugInfo('Face detection active');
-			} catch (err: any) {
-				console.error('Failed to load face landmarker:', err);
-				setDebugInfo('Camera active (no face detection)');
-			}
-		};
-
-		loadModel();
-
-		return () => {
-			isActive = false;
-		};
-	}, [cameraReady]);
-
-	// Handle voice toggle
-	const handleVoiceToggle = () => {
-		if (isRecording) {
-			setIsRecording(false);
-			onVoiceStop?.();
-		} else {
-			setIsRecording(true);
-			onVoiceStart?.();
-		}
-	};
-
-	if (!enabled) {
-		return null;
-	}
-
-	if (error) {
-		return (
-			<div
-				className="position-fixed top-0 start-0 w-100 h-100 d-flex flex-column align-items-center justify-content-center"
-				style={{
-					background: darkMode ? '#000' : '#1a1a2e',
-					zIndex: 1000,
-				}}
-			>
-				<div className="text-center p-4">
-					<div className="mb-3" style={{ color: '#dc3545', fontSize: '3rem' }}>📷</div>
-					<h4 style={{ color: darkMode ? '#F5F3F0' : '#2C3A4F' }}>Camera Error</h4>
-					<p style={{ color: darkMode ? '#A8B5C4' : '#6B7B94' }}>{error}</p>
-					<p className="small" style={{ color: darkMode ? '#7A8BA3' : '#8B9AAF' }}>
-						{debugInfo}
-					</p>
-					<button
-						onClick={onClose}
-						className="btn mt-3"
-						style={{
-							background: '#4A5F7F',
-							color: 'white',
-							borderRadius: '20px',
-							padding: '8px 24px',
-						}}
-					>
-						Back to Chat
-					</button>
-				</div>
-			</div>
-		);
-	}
-
-	// Render fullscreen camera view when enabled
-	if (!isFullscreen) {
-		// When not in fullscreen, render hidden video element to keep refs working
-		return (
-			<>
-				<video
-					ref={videoRef}
-					style={{ display: 'none' }}
-					playsInline
-					muted
-					autoPlay
-				/>
-				<canvas
-					ref={canvasRef}
-					width={640}
-					height={480}
-					style={{ display: 'none' }}
-				/>
-			</>
-		);
-	}
-
-	// Fullscreen camera view
 	return (
 		<div
 			className="position-fixed top-0 start-0 w-100 h-100 d-flex flex-column align-items-center justify-content-center"
 			style={{
 				background: darkMode ? '#000' : '#1a1a2e',
-				zIndex: 1000,
+				zIndex: 1001,
 			}}
 		>
-			{/* Loading State */}
-			{isLoading && (
-				<div className="position-absolute d-flex flex-column align-items-center gap-3" style={{ zIndex: 10 }}>
-					<div
-						className="spinner-border"
-						role="status"
-						style={{ width: '3rem', height: '3rem', color: '#4A5F7F' }}
-					>
-						<span className="visually-hidden">Loading...</span>
-					</div>
-					<p style={{ color: darkMode ? '#A8B5C4' : '#6B7B94' }}>{debugInfo}</p>
-				</div>
-			)}
+			<div className="position-absolute d-flex gap-2" style={{ top: '20px', right: '20px', zIndex: 1002 }}>
+				{onToggleDisplayMode && (
+					<button onClick={onToggleDisplayMode} className="btn btn-sm d-flex align-items-center justify-content-center" style={{ background: darkMode ? 'rgba(74, 95, 127, 0.3)' : 'rgba(74, 95, 127, 0.2)', color: darkMode ? '#A8B5C4' : '#4A5F7F', border: `1px solid ${darkMode ? 'rgba(74, 95, 127, 0.4)' : 'rgba(74, 95, 127, 0.3)'}`, borderRadius: '8px', padding: '8px 12px', minWidth: '90px', height: '36px' }}>
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+							<path d="M2.062 12.348a1 1 0 0 1 0-.696"></path>
+							<path d="M10.5 17.5a1 1 0 0 1 0-.696"></path>
+							<circle cx="12" cy="12" r="3"></circle>
+							<path d="M12 2v2"></path>
+							<path d="M12 20v2"></path>
+							<path d="m4.93 4.93 1.41 1.41"></path>
+							<path d="m17.66 17.66 1.41 1.41"></path>
+						</svg>
+						<span style={{ marginLeft: '6px' }}>Vision</span>
+					</button>
+				)}
+				{onClose && (
+					<button onClick={onClose} className="btn btn-sm d-flex align-items-center justify-content-center" style={{ background: darkMode ? 'rgba(220, 53, 69, 0.3)' : 'rgba(220, 53, 69, 0.2)', color: '#DC3545', border: `1px solid ${darkMode ? 'rgba(220, 53, 69, 0.4)' : 'rgba(220, 53, 69, 0.3)'}`, borderRadius: '8px', padding: '8px 12px', minWidth: '90px', height: '36px' }}>
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+						<span style={{ marginLeft: '6px' }}>Back</span>
+					</button>
+				)}
+			</div>
 
-			{/* Video Container */}
 			<div
 				className="position-relative"
 				style={{
@@ -512,7 +285,6 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 					autoPlay
 				/>
 
-				{/* Canvas overlay for face landmarks */}
 				<canvas
 					ref={canvasRef}
 					width={640}
@@ -526,11 +298,9 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 						transform: 'scaleX(-1)',
 						pointerEvents: 'none',
 						opacity: cameraReady ? 1 : 0,
-						transition: 'opacity 0.3s ease',
 					}}
 				/>
 
-				{/* Status Badge */}
 				<div
 					className="position-absolute px-3 py-1 rounded-pill"
 					style={{
@@ -545,115 +315,76 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 						zIndex: 5,
 					}}
 				>
-					{faceDetected ? '● Live' : cameraReady ? '○ Waiting...' : '⟳ Loading...'}
+					{faceDetected ? '● Face detected' : cameraReady ? '○ No face' : '⟳ Loading...'}
 				</div>
-
-				{/* Status indicator - shows processing/recording/ready states */}
-				{cameraReady && (
-					<div
-						className="position-absolute px-3 py-1 rounded-pill"
-						style={{
-							bottom: '20px',
-							left: '50%',
-							transform: 'translateX(-50%)',
-							background: isProcessing
-								? 'rgba(40, 167, 69, 0.9)'
-								: isRecording
-									? 'rgba(220, 53, 69, 0.9)'
-									: 'rgba(255, 193, 7, 0.9)',
-							color: 'white',
-							fontSize: '0.85rem',
-							fontWeight: 600,
-							backdropFilter: 'blur(10px)',
-							zIndex: 5,
-						}}
-					>
-						{isProcessing
-							? '⟳ Aira thinking...'
-							: isRecording
-								? '🔴 Recording'
-								: '⏸️ Tap to speak'}
-					</div>
-				)}
 			</div>
 
-			{/* Controls - Record Button Only */}
-			<div className="mt-4 d-flex flex-column align-items-center gap-3">
-				{cameraReady && (
-					<button
-						onClick={handleVoiceToggle}
-						className="btn rounded-circle d-flex align-items-center justify-content-center"
-						style={{
-							width: '80px',
-							height: '80px',
-							background: isRecording
-								? 'linear-gradient(135deg, #dc3545 0%, #c82333 100%)'
-								: 'linear-gradient(135deg, #4A5F7F 0%, #6B7B94 100%)',
-							border: 'none',
-							boxShadow: isRecording
-								? '0 0 50px rgba(220, 53, 69, 0.8)'
-								: '0 8px 30px rgba(74, 95, 127, 0.4)',
-							transition: 'all 0.3s ease',
-							animation: isRecording ? 'pulse 1.5s infinite' : 'none',
-						}}
-						title={isRecording ? 'Stop Recording' : 'Start Recording'}
-					>
-						<svg
-							width="36"
-							height="36"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="white"
-							strokeWidth="2"
-							strokeLinecap="round"
-							strokeLinejoin="round"
-						>
-							{isRecording ? (
-								<rect x="6" y="6" width="12" height="12" rx="2"></rect>
-							) : (
-								<>
-									<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
-									<path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-									<line x1="12" y1="19" x2="12" y2="22"></line>
-								</>
-							)}
-						</svg>
-					</button>
-				)}
+			<p style={{ color: darkMode ? '#A8B5C4' : '#6B7B94', fontSize: '0.8rem', marginTop: '10px' }}>
+				{debugInfo}
+			</p>
 
-				<p style={{ color: darkMode ? '#A8B5C4' : '#6B7B94', fontSize: '0.85rem' }}>
-					{isRecording ? '🔴 Recording...' : isSpeaking ? '🎙️ Aira speaking...' : 'Tap to record'}
-				</p>
-
-				{/* Back/Close Button */}
+			<div
+				className="position-fixed d-flex flex-column align-items-center gap-3"
+				style={{
+					bottom: '40px',
+					left: '50%',
+					transform: 'translateX(-50%)',
+					zIndex: 1003,
+				}}
+			>
 				<button
-					onClick={onClose}
-					className="btn rounded-circle d-flex align-items-center justify-content-center mt-2"
+					onClick={handleVoiceToggle}
+					className="btn rounded-circle d-flex align-items-center justify-content-center"
 					style={{
-						width: '44px',
-						height: '44px',
-						background: 'rgba(255,255,255,0.1)',
-						border: '2px solid rgba(255,255,255,0.3)',
-						color: 'white',
-						backdropFilter: 'blur(10px)',
+						width: '80px',
+						height: '80px',
+						background: effectiveIsRecording
+							? 'linear-gradient(135deg, #dc3545 0%, #c82333 100%)'
+							: 'linear-gradient(135deg, #4A5F7F 0%, #6B7B94 100%)',
+						border: 'none',
+						boxShadow: effectiveIsRecording
+							? '0 0 50px rgba(220, 53, 69, 0.8)'
+							: '0 8px 30px rgba(74, 95, 127, 0.4)',
+						transition: 'all 0.3s ease',
+						animation: effectiveIsRecording ? 'pulse 1.5s infinite' : 'none',
 					}}
-					title="Close camera"
+					title={effectiveIsRecording ? 'Stop Recording' : 'Start Recording'}
 				>
-					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-						<line x1="18" y1="6" x2="6" y2="18"></line>
-						<line x1="6" y1="6" x2="18" y2="18"></line>
+					<svg
+						width="36"
+						height="36"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="white"
+						strokeWidth="2"
+						strokeLinecap="round"
+						strokeLinejoin="round"
+					>
+						{effectiveIsRecording ? (
+							<rect x="6" y="6" width="12" height="12" rx="2"></rect>
+						) : (
+							<>
+								<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+								<path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+								<line x1="12" y1="19" x2="12" y2="22"></line>
+							</>
+						)}
 					</svg>
 				</button>
-			</div>
 
-			<style>{`
-				@keyframes pulse {
-					0%, 100% { transform: scale(1); box-shadow: 0 0 40px rgba(220, 53, 69, 0.6); }
-					50% { transform: scale(1.05); box-shadow: 0 0 60px rgba(220, 53, 69, 0.8); }
-				}
-			`}</style>
+				<p style={{ color: darkMode ? '#A8B5C4' : '#6B7B94', fontSize: '0.85rem' }}>
+					{effectiveIsRecording ? '🔴 Recording...' : isSpeaking ? '🎙️ Aira speaking...' : 'Tap to record'}
+				</p>
+
+				<style>{`
+					@keyframes pulse {
+						0%, 100% { transform: scale(1); box-shadow: 0 0 40px rgba(220, 53, 69, 0.6); }
+						50% { transform: scale(1.05); box-shadow: 0 0 60px rgba(220, 53, 69, 0.8); }
+					}
+				`}</style>
+			</div>
 		</div>
 	);
 };
 
-export default React.memo(CameraSensor);
+export default CameraSensor;

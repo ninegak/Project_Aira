@@ -36,7 +36,9 @@ interface ChatProps {
 	darkMode: boolean;
 	playingMessageIndex: number | null;
 	cameraEnabled: boolean;
+	displayMode: 'eyes' | 'camera';
 	onToggleCamera: () => void;
+	onToggleDisplayMode: () => void;
 	isVoiceRecording?: boolean;
 }
 
@@ -224,7 +226,9 @@ const Chat: React.FC<ChatProps> = ({
 	darkMode,
 	playingMessageIndex,
 	cameraEnabled,
+	displayMode,
 	onToggleCamera,
+	onToggleDisplayMode,
 }) => {
 	// Memoize class names to avoid recalculation
 	const classes = useMemo(() => ({
@@ -407,39 +411,46 @@ const Chat: React.FC<ChatProps> = ({
 					</button>
 					<button
 						className="btn d-flex align-items-center justify-content-center"
-						onClick={onToggleCamera}
+						onClick={cameraEnabled ? onToggleDisplayMode : onToggleCamera}
 						disabled={loading}
-						aria-label={cameraEnabled ? 'Disable camera' : 'Enable camera'}
-						title={cameraEnabled ? 'Disable camera' : 'Enable camera'}
+						aria-label={cameraEnabled ? (displayMode === 'eyes' ? 'Switch to camera' : 'Switch to eyes') : 'Enable camera'}
+						title={cameraEnabled ? (displayMode === 'eyes' ? 'Switch to camera' : 'Switch to eyes') : 'Enable camera'}
 						style={{
 							background: cameraEnabled
-								? darkMode
-									? 'rgba(40, 167, 69, 0.2)'
-									: 'rgba(40, 167, 69, 0.1)'
-								: darkMode
-									? 'rgba(74, 95, 127, 0.2)'
-									: 'rgba(74, 95, 127, 0.1)',
-							color: cameraEnabled ? '#28a745' : classes.textMuted,
+								? displayMode === 'eyes'
+									? darkMode ? 'rgba(233, 30, 99, 0.2)' : 'rgba(233, 30, 99, 0.1)'
+									: darkMode ? 'rgba(40, 167, 69, 0.2)' : 'rgba(40, 167, 69, 0.1)'
+								: darkMode ? 'rgba(74, 95, 127, 0.2)' : 'rgba(74, 95, 127, 0.1)',
+							color: cameraEnabled
+								? displayMode === 'eyes' ? '#E91E63' : '#28a745'
+								: classes.textMuted,
 							borderRadius: '50%',
 							width: '44px',
 							height: '44px',
-							border: `1px solid ${cameraEnabled ? '#28a745' : classes.inputBorder}`,
+							border: `1px solid ${cameraEnabled
+								? displayMode === 'eyes' ? '#E91E63' : '#28a745'
+								: classes.inputBorder}`,
 							transition: 'all 0.2s ease'
 						}}
 					>
-						<svg
-							width="20"
-							height="20"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							strokeWidth="2"
-							strokeLinecap="round"
-							strokeLinejoin="round"
-						>
-							<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-							<circle cx="12" cy="13" r="4"></circle>
-						</svg>
+						{cameraEnabled && displayMode === 'eyes' ? (
+							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+								<path d="M2.062 12.348a1 1 0 0 1 0-.696"></path>
+								<path d="M10.5 17.5a1 1 0 0 1 0-.696"></path>
+								<circle cx="12" cy="12" r="3"></circle>
+								<path d="M12 2v2"></path>
+								<path d="M12 20v2"></path>
+								<path d="m4.93 4.93 1.41 1.41"></path>
+								<path d="m17.66 17.66 1.41 1.41"></path>
+								<path d="M6 18h.01"></path>
+								<path d="M18 12h.01"></path>
+							</svg>
+						) : (
+							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+								<circle cx="12" cy="13" r="4"></circle>
+							</svg>
+						)}
 					</button>
 				</div>
 
