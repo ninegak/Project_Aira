@@ -10,7 +10,8 @@ interface CameraSensorProps {
 	enabled?: boolean;
 	isFullscreen?: boolean;
 	onClose?: () => void;
-	isProcessing?: boolean; // Add loading state for Aira processing
+	isProcessing?: boolean;
+	isSpeaking?: boolean;
 }
 
 const CameraSensor: React.FC<CameraSensorProps> = ({
@@ -22,6 +23,7 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 	isFullscreen = false,
 	onClose,
 	isProcessing = false,
+	isSpeaking = false,
 }) => {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -620,7 +622,7 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 				)}
 
 				<p style={{ color: darkMode ? '#A8B5C4' : '#6B7B94', fontSize: '0.85rem' }}>
-					{isRecording ? '🔴 Recording...' : 'Tap to record'}
+					{isRecording ? '🔴 Recording...' : isSpeaking ? '🎙️ Aira speaking...' : 'Tap to record'}
 				</p>
 
 				{/* Back/Close Button */}

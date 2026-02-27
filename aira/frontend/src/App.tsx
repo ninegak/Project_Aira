@@ -3,7 +3,7 @@ import { sendChatMessage, transcribeAudio, sendCameraFeatures } from './api/chat
 import { saveConversations, loadConversations, saveDarkMode, loadDarkMode } from './api/storageAPI';
 import type { Message, Conversation } from './types/chat';
 import type { CameraFeatures, EmotionalState } from './api/chatAPI';
-import { AudioQueueManager, VoiceMessageManager, TtsAudioPlayer } from './utils/Audiomanager';
+import { AudioQueueManager, VoiceMessageManager, TtsAudioPlayer } from './utils/audiomanager';
 import Sidebar from './components/Sidebar';
 import Chat from './components/Chat';
 import Landing from './components/Landing';
@@ -27,6 +27,7 @@ function App() {
 	const ttsPlayer = useMemo(() => new TtsAudioPlayer(), []);
 
 	const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
+	const isSpeaking = playingMessageIndex !== null;
 
 	const [isRecording, setIsRecording] = useState<boolean>(false);
 	const [emotion, setEmotion] = useState<string | null>(null);
@@ -263,6 +264,7 @@ function App() {
 		},
 		[messages, ttsPlayer]
 	);
+	const shouldAutoRestartRef = useRef<boolean>(false);
 
 	// Simplified voice message handler using managers
 	const handleVoiceMessage = useCallback(
@@ -338,6 +340,20 @@ function App() {
 					console.log('✅ Voice message complete');
 					setLoading(false);
 					voiceMessageManager.completeMessage();
+
+					// Wait for audio to finish playing
+					const checkAudioComplete = () => {
+						if (audioQueueManager.getQueueSize() === 0 && !audioQueueManager.getIsPlaying()) {
+							console.log('🔊 Audio complete, restarting recording');
+							if (voiceModeEnabled && cameraEnabled && shouldAutoRestartRef.current) {
+								setTimeout(() => startVoiceRecording(), 500);
+							}
+						} else {
+							console.log('⏳ Waiting for audio... Queue:', audioQueueManager.getQueueSize());
+							setTimeout(checkAudioComplete, 500);
+						}
+					};
+					setTimeout(checkAudioComplete, 100);
 				},
 			}).catch((err) => {
 				console.error('❌ Failed to send voice message:', err);
@@ -698,6 +714,7 @@ function App() {
 					onToggleFullscreen={toggleCameraFullscreen}
 					onClose={closeCamera}
 					isProcessing={loading}
+					isSpeaking={isSpeaking}
 				/>
 			)}
 		</div>

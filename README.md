@@ -19,6 +19,32 @@ Aira is a **privacy-first, voice-enabled AI assistant** that runs entirely on yo
 - 💬 **Chat History** - Conversations are saved locally
 - 🎙️ **Text-to-Speech** - Aira speaks responses back to you
 
+### How Emotion Detection Works
+
+When you enable the camera, Aira:
+
+1. **Captures** your face via webcam
+2. **Analyzes** 478 facial landmarks using MediaPipe
+3. **Calculates** emotional metrics:
+   - Fatigue (eye openness, blink rate)
+   - Engagement (face attention)
+   - Stress (head position)
+   - Happiness (smile detection)
+4. **Injects context** into the LLM:
+   ```
+   "User appears fatigued (70% confidence).
+   Fatigue: 70%, Engagement: 30%.
+   Recommend: Keep responses brief."
+   ```
+5. **Adapts** her responses to match your mood
+
+| User State | Aira's Response |
+|-----------|-----------------|
+| 😴 Tired | Shorter, gentler answers |
+| 😊 Happy | Matches your energy |
+| 😰 Stressed | Calmer, simpler explanations |
+| 😐 Neutral | Standard helpful responses |
+
 ## 🏗️ Architecture
 
 Aira consists of three main components:
@@ -188,6 +214,22 @@ cd aira && cargo run --release
 # Option 2: CLI Version
 cd aira
 .\target\release\aira_server.exe
+```
+
+**With custom LLM model:**
+```bash
+cd aira
+
+# Smaller/faster model (recommended for presentations)
+./target/release/aira_server --llm-model ./models/qwen2.5-1.5b-instruct-q5_k_m.gguf
+
+# Larger/smarter model
+./target/release/aira_server --llm-model ./models/qwen2.5-3b-instruct-q4_0.gguf
+```
+
+Or use environment variable:
+```bash
+AIRA_LLM_MODEL=./models/qwen2.5-1.5b-instruct-q5_k_m.gguf ./target/release/aira_server
 ```
 
 Then open your browser to **http://localhost:5173**

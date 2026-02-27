@@ -157,14 +157,19 @@ pub async fn chat(
                     sentence_buffer.push_str(&cleaned_token);
 
                     // Send to TTS on sentence boundaries
-                    if sentence_buffer.ends_with('.')
-                        || sentence_buffer.ends_with('?')
-                        || sentence_buffer.ends_with('!')
-                        || sentence_buffer.len() > 150
-                    {
-                        if !sentence_buffer.trim().is_empty() {
-                            let _ = tts_tx.blocking_send(sentence_buffer.clone());
-                            sentence_buffer.clear();
+                    // Wait for complete sentences (more robust boundary detection)
+                    if sentence_buffer.len() >= 50 {
+                        // Find last sentence boundary
+                        let last_boundary = sentence_buffer
+                            .rfind(|c| c == '.' || c == '?' || c == '!' || c == '\n')
+                            .unwrap_or(0);
+                        
+                        if last_boundary > 0 {
+                            let chunk = sentence_buffer[..=last_boundary].to_string();
+                            if !chunk.trim().is_empty() {
+                                let _ = tts_tx.blocking_send(chunk);
+                            }
+                            sentence_buffer = sentence_buffer[last_boundary + 1..].to_string();
                         }
                     }
 
@@ -179,8 +184,27 @@ pub async fn chat(
                     .data(format!("{:.2}", tps))));
             }
 
-            // Send remaining buffer to TTS
-            if !sentence_buffer.trim().is_empty() {
+            // Send remaining buffer to TTS (ensure complete sentences)
+            // Don't send tiny fragments - wait for meaningful content
+            while sentence_buffer.len() > 20 {
+                // Find last sentence boundary
+                let last_boundary = sentence_buffer
+                    .rfind(|c| c == '.' || c == '?' || c == '!' || c == '\n' || c == ',')
+                    .unwrap_or(sentence_buffer.len().saturating_sub(1));
+                
+                if last_boundary > 0 {
+                    let chunk = sentence_buffer[..=last_boundary].to_string();
+                    if !chunk.trim().is_empty() {
+                        let _ = tts_tx.blocking_send(chunk);
+                    }
+                    sentence_buffer = sentence_buffer[last_boundary + 1..].to_string();
+                } else {
+                    break;
+                }
+            }
+            
+            // Send final chunk if there's content
+            if !sentence_buffer.trim().is_empty() && sentence_buffer.len() > 5 {
                 let _ = tts_tx.blocking_send(sentence_buffer);
             }
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface LandingProps {
 	darkMode: boolean;
@@ -159,7 +159,7 @@ const Landing: React.FC<LandingProps> = ({ darkMode, onStartChat }) => {
 							color: darkMode ? COLORS.textLight : COLORS.textDark,
 						}}
 					>
-						Meet{' '}
+						Welcome to{' '}
 						<span
 							style={{
 								background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.primaryLight} 100%)`,
@@ -168,7 +168,7 @@ const Landing: React.FC<LandingProps> = ({ darkMode, onStartChat }) => {
 								backgroundClip: 'text',
 							}}
 						>
-							Aira
+							MindAi
 						</span>
 					</h1>
 
@@ -182,7 +182,7 @@ const Landing: React.FC<LandingProps> = ({ darkMode, onStartChat }) => {
 							color: darkMode ? '#7A8BA3' : '#6B7B94',
 						}}
 					>
-						Your voice-enabled AI assistant.
+						Meet Aira your friendly AI assistant.
 						<br />
 						Speak naturally. Get instant answers. All local.
 					</p>
