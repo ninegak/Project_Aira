@@ -55,11 +55,16 @@ const Sidebar: React.FC<SidebarProps> = ({
 
 	return (
 		<div 
-			className="d-flex flex-column vh-100 sidebar"
+			className="d-flex flex-column sidebar"
 			style={{
 				width: '280px',
+				height: '100vh',
+				position: 'fixed',
+				left: 0,
+				top: 0,
 				background: darkMode ? '#1a1d23' : '#F8F9FA',
 				borderRight: `1px solid ${darkMode ? '#2A2D35' : '#E8EAED'}`,
+				zIndex: 1000,
 			}}
 		>
 			{/* Header */}
@@ -82,7 +87,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 							background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.primaryLight} 100%)`,
 						}}
 					>
-						<span className="text-white fw-bold" style={{ fontSize: '12px' }}>A</span>
+						<span style={{ fontSize: '14px' }}>🌸</span>
 					</div>
 					<span className="fw-semibold">Aira</span>
 				</a>
@@ -150,8 +155,9 @@ const Sidebar: React.FC<SidebarProps> = ({
 						{conversations.map((conv) => (
 							<div
 								key={conv.id}
+								data-conversation="true"
 								onClick={() => onSwitchConversation?.(conv.id)}
-								className="d-flex align-items-center gap-2 p-2 rounded-3 cursor-pointer"
+								className="d-flex align-items-center gap-2 p-2 rounded-3 cursor-pointer conversation-item"
 								style={{
 									background: currentConversationId === conv.id
 										? (darkMode ? 'rgba(74, 95, 127, 0.25)' : 'rgba(74, 95, 127, 0.12)')
@@ -232,7 +238,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
 			<style>{`
 				/* Show delete button on hover */
-				[data-conversation]:hover button {
+				.conversation-item:hover button {
 					opacity: 1 !important;
 				}
 			`}</style>
@@ -253,7 +259,19 @@ const Sidebar: React.FC<SidebarProps> = ({
 							background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.primaryLight} 100%)`,
 						}}
 					>
-						<span className="text-white fw-semibold" style={{ fontSize: '14px' }}>U</span>
+						<svg 
+							width="20" 
+							height="20" 
+							viewBox="0 0 24 24" 
+							fill="none" 
+							stroke="white" 
+							strokeWidth="2" 
+							strokeLinecap="round" 
+							strokeLinejoin="round"
+						>
+							<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+							<circle cx="12" cy="7" r="4"></circle>
+						</svg>
 					</div>
 					<div className="flex-grow-1 min-w-0">
 						<p 

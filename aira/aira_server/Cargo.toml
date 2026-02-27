@@ -16,6 +16,9 @@ hound = "3.5"
 base64 = "0.21"
 axum-extra = { version = "0.12.5", features = ["multipart"] }
 async-trait = "0.1.77"
+# Audio format support
+symphonia = { version = "0.5", features = ["all"] }
+lazy_static = "1.5.0"
 
 aira_brain = { path = "../aira_brain" }
 bytes = "1.11.1"

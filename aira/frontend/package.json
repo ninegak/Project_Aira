@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.32",
     "@microsoft/fetch-event-source": "^2.0.1",
     "bootstrap": "^5.3.8",
     "react": "^19.2.0",
