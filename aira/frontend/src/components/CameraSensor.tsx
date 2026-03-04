@@ -12,6 +12,8 @@ interface CameraSensorProps {
 	onVoiceStart?: () => void;
 	onVoiceStop?: () => void;
 	onFeaturesUpdate?: (features: CameraFeatures) => void;
+	isFullscreen?: boolean;
+	showUI?: boolean;
 }
 
 const CameraSensor: React.FC<CameraSensorProps> = ({
@@ -24,6 +26,8 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 	onVoiceStart,
 	onVoiceStop,
 	onFeaturesUpdate,
+	isFullscreen = true,
+	showUI = true,
 }) => {
 	const [localIsRecording, setLocalIsRecording] = useState(false);
 	const videoRef = useRef<HTMLVideoElement>(null);
@@ -141,7 +145,6 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 						const features = calculateFeaturesRef.current(result);
 						if (features) {
 							onFeaturesUpdateRef.current?.(features);
-							console.log('Camera features:', features);
 						}
 					}
 				} catch (err) {
@@ -219,6 +222,29 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 			}
 		};
 	}, []);
+
+	// Background mode: render hidden but keep camera running
+	const isHidden = !isFullscreen || !showUI;
+
+	if (isHidden) {
+		return (
+			<>
+				<video
+					ref={videoRef}
+					style={{ display: 'none' }}
+					playsInline
+					muted
+					autoPlay
+				/>
+				<canvas
+					ref={canvasRef}
+					width={640}
+					height={480}
+					style={{ display: 'none' }}
+				/>
+			</>
+		);
+	}
 
 	return (
 		<div
@@ -387,4 +413,4 @@ const CameraSensor: React.FC<CameraSensorProps> = ({
 	);
 };
 
-export default CameraSensor;
+export default React.memo(CameraSensor);
