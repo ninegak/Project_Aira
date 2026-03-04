@@ -173,6 +173,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/camera/features", post(api::process_camera_features))
         .route("/api/camera/status", get(api::get_camera_status))
         .route("/api/emotion/current", get(api::get_emotion_details))
+        .route("/api/test-stress", post(api::test_stress))
+        .route("/api/alerts", get(api::get_alert))
         .with_state((aira, &CHAT_SEMAPHORE))
         .layer(CorsLayer::permissive());
     

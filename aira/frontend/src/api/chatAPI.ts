@@ -133,3 +133,39 @@ export async function transcribeAudio(audioBlob: Blob): Promise<{ text: string; 
 
 	return response.json();
 }
+
+// Test stress alert - calls backend and returns alert message with audio
+export async function testStressAlert(durationSeconds: number = 60): Promise<{ message: string; alert_message: string; audio_base64: string | null }> {
+	const response = await fetch(`${API_BASE_URL}/api/test-stress`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ duration_seconds: durationSeconds }),
+	});
+
+	if (!response.ok) {
+		throw new Error(`Failed to test stress: ${response.statusText}`);
+	}
+
+	return response.json();
+}
+
+// Poll for pending alerts from backend
+export async function pollAlerts(): Promise<{ has_alert: boolean; message: string | null; audio_base64: string | null }> {
+	try {
+		const response = await fetch(`${API_BASE_URL}/api/alerts`);
+		if (!response.ok) {
+			console.error('pollAlerts: response not ok', response.status);
+			return { has_alert: false, message: null, audio_base64: null };
+		}
+		const data = await response.json();
+		if (data.has_alert) {
+			console.log('pollAlerts: received alert:', data.message, 'audio:', data.audio_base64 ? 'yes' : 'no');
+		}
+		return data;
+	} catch (error) {
+		console.error('pollAlerts: error', error);
+		return { has_alert: false, message: null, audio_base64: null };
+	}
+}

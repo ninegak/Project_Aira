@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { sendChatMessage, transcribeAudio, sendCameraFeatures } from './api/chatAPI';
+import { sendChatMessage, transcribeAudio, sendCameraFeatures, pollAlerts } from './api/chatAPI';
 import { saveConversations, loadConversations, saveDarkMode, loadDarkMode } from './api/storageAPI';
 import type { Message, Conversation } from './types/chat';
 import type { CameraFeatures, EmotionalState } from './api/chatAPI';
@@ -52,6 +52,22 @@ function App() {
 	const voiceRecorderRef = useRef<MediaRecorder | null>(null);
 	const voiceChunksRef = useRef<Blob[]>([]);
 
+	// Mental health monitoring state
+	const [mentalAlert, setMentalAlert] = useState<{ type: string; message: string } | null>(null);
+	const [showMoodWidget, setShowMoodWidget] = useState<boolean>(false);
+	const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
+	const [cameraUIVisible, setCameraUIVisible] = useState<boolean>(false);
+
+	// Track mood history during conversation for summary
+	const moodHistoryRef = useRef<{ emotion: string; timestamp: number }[]>([]);
+	const [conversationSummary, setConversationSummary] = useState<{ message: string; moods: string[] } | null>(null);
+
+	// Track emotion durations (in seconds)
+	const fatigueDurationRef = useRef<number>(0);
+	const engagementLowDurationRef = useRef<number>(0);
+	const eyeStrainDurationRef = useRef<number>(0);
+	const activeSessionRef = useRef<number>(0);
+
 	const [darkMode, setDarkMode] = useState<boolean>(() => loadDarkMode());
 
 	const [viewState, setViewState] = useState<ViewState>('landing');
@@ -77,6 +93,44 @@ function App() {
 	};
 
 	const handleNewConversation = useCallback(() => {
+		// Generate mood summary before starting new conversation
+		if (moodHistoryRef.current.length > 5) {
+			const moodCounts: Record<string, number> = {};
+			moodHistoryRef.current.forEach(m => {
+				moodCounts[m.emotion] = (moodCounts[m.emotion] || 0) + 1;
+			});
+
+			const total = moodHistoryRef.current.length;
+			const moods = Object.entries(moodCounts)
+				.sort((a, b) => b[1] - a[1])
+				.filter(([_, count]) => count / total > 0.2)
+				.map(([mood]) => mood);
+
+			if (moods.length > 0) {
+				let summaryMessage = '';
+				if (moods.includes('focused') && moods.includes('happy')) {
+					summaryMessage = "You seemed focused and positive during our chat! Great energy! 🎯";
+				} else if (moods.includes('stressed')) {
+					summaryMessage = "You seemed a bit stressed. Remember to take breaks when needed! 💙";
+				} else if (moods.includes('fatigued')) {
+					summaryMessage = "You seemed tired. Make sure to rest when you can! 😴";
+				} else if (moods.includes('happy')) {
+					summaryMessage = "You seemed happy! It was great chatting with you! 😊";
+				} else if (moods.includes('disengaged')) {
+					summaryMessage = "You seemed distracted. Hope everything's okay! 🤔";
+				} else if (moods.includes('focused')) {
+					summaryMessage = "You seemed focused! Great work! 🎯";
+				}
+
+				if (summaryMessage) {
+					setConversationSummary({ message: summaryMessage, moods });
+				}
+			}
+
+			// Clear mood history for new conversation
+			moodHistoryRef.current = [];
+		}
+
 		// Save current conversation if it has messages
 		if (messages.length > 0) {
 			const title = getConversationTitle(messages);
@@ -206,18 +260,24 @@ function App() {
 		[currentConversationId, audioQueueManager, ttsPlayer]
 	);
 
-	// Toggle camera on/off with modal confirmation
+	// Toggle camera UI on/off (camera keeps running in background)
 	const toggleCamera = useCallback(() => {
 		if (!cameraEnabled) {
+			// First time - show privacy modal
 			setShowPrivacyModal(true);
+		} else if (!cameraUIVisible) {
+			// Camera enabled but UI hidden - show UI
+			setCameraUIVisible(true);
 		} else {
-			setCameraEnabled(false);
+			// Camera enabled and UI visible - toggle between Eyes and Camera view
+			setDisplayMode(displayMode === 'eyes' ? 'camera' : 'eyes');
 		}
-	}, [cameraEnabled]);
+	}, [cameraEnabled, cameraUIVisible, displayMode]);
 
 	const handleCameraConfirm = useCallback(() => {
 		setShowPrivacyModal(false);
 		setCameraEnabled(true);
+		setCameraUIVisible(true);
 		setIsCameraFullscreen(true);
 	}, []);
 
@@ -244,8 +304,17 @@ function App() {
 	}, []);
 
 	const closeCamera = useCallback(() => {
+		// Hide camera UI but keep camera running in background for mental monitoring
+		// Reset display mode to eyes for next time
+		setCameraUIVisible(false);
+		setDisplayMode('eyes');
+	}, []);
+
+	// Actually disable camera completely
+	const disableCamera = useCallback(() => {
 		setCameraEnabled(false);
-		setIsCameraFullscreen(false);
+		setCameraUIVisible(false);
+		setDisplayMode('eyes');
 	}, []);
 
 	// Simplified TTS playback using the new player
@@ -434,16 +503,42 @@ function App() {
 		});
 	}, []);
 
+	const lastMoodContextRef = useRef<string>('');
+
 	const handleSendMessage = useCallback(() => {
 		if (inputMessage.trim() && !loading) {
 			const userMessage: Message = { sender: 'user', text: inputMessage };
-			const messageToSend = inputMessage;
+			let messageToSend = inputMessage;
 
 			// Create conversation ID if this is the first message
-			if (isFirstMessageRef.current && !currentConversationId) {
+			const isNewConversation = isFirstMessageRef.current && !currentConversationId;
+			if (isNewConversation) {
 				const newConvId = generateId();
 				setCurrentConversationId(newConvId);
 				isFirstMessageRef.current = false;
+
+				// Add mood context to first message if camera is enabled and we have emotion data
+				if (cameraEnabled && _emotionalState) {
+					const state = _emotionalState;
+					let moodContext = '';
+
+					if (state.fatigue > 0.7) {
+						moodContext = '[User seems fatigued - be concise and supportive] ';
+					} else if (state.stress > 0.6) {
+						moodContext = '[User seems stressed - be calm and reassuring] ';
+					} else if (state.engagement > 0.7) {
+						moodContext = '[User seems focused and engaged] ';
+					} else if (state.engagement < 0.3) {
+						moodContext = '[User seems disengaged - try to re-engage them] ';
+					} else if (state.positive_affect > 0.6) {
+						moodContext = '[User seems happy - match their positive energy] ';
+					}
+
+					if (moodContext) {
+						messageToSend = moodContext + messageToSend;
+						lastMoodContextRef.current = moodContext;
+					}
+				}
 			}
 
 			setMessages((prevMessages) => [...prevMessages, userMessage]);
@@ -501,7 +596,7 @@ function App() {
 				setLoading(false);
 			});
 		}
-	}, [inputMessage, loading, currentConversationId]);
+	}, [inputMessage, loading, currentConversationId, cameraEnabled, _emotionalState]);
 
 	const startRecording = useCallback(async () => {
 		try {
@@ -599,8 +694,43 @@ function App() {
 		saveConversations(conversations);
 	}, [conversations]);
 
+	// Poll for backend alerts (every 2 seconds)
+	const handleSendMessageRef = useRef(handleSendMessage);
+	handleSendMessageRef.current = handleSendMessage;
+	const inputMessageRef = useRef(inputMessage);
+	inputMessageRef.current = inputMessage;
+	const setInputMessageRef = useRef(setInputMessage);
+	setInputMessageRef.current = setInputMessage;
+
+	useEffect(() => {
+		const checkAlert = async () => {
+			const result = await pollAlerts();
+			if (result.has_alert && result.message) {
+				// Show alert toast (don't add to chat)
+				setMentalAlert({ type: 'backend', message: result.message });
+				
+				// Play audio directly - never inject as user message
+				if (result.audio_base64) {
+					console.log('🔊 Playing alert audio directly');
+					try {
+						await ttsPlayer.play(-1, [result.audio_base64]);
+					} catch (e) {
+						console.error('Failed to play alert audio:', e);
+					}
+				} else {
+					// No audio - still don't inject as user message
+					console.log('ℹ️ No audio for alert, showing toast only');
+				}
+			}
+		};
+
+		const interval = setInterval(checkAlert, 2000);
+		return () => clearInterval(interval);
+	}, []);
+
 	// Throttle camera feature updates
 	const lastCameraUpdateRef = useRef<number>(0);
+	const lastMentalCheckRef = useRef<number>(0);
 
 	const handleCameraFeatures = useCallback(async (features: CameraFeatures) => {
 		setCameraFeatures(features);
@@ -610,6 +740,9 @@ function App() {
 			return;
 		}
 		lastCameraUpdateRef.current = now;
+
+		// Track active session time (only when face is present)
+		activeSessionRef.current += 1;
 
 		if (features.face_present) {
 			try {
@@ -630,6 +763,103 @@ function App() {
 					dominantEmotion = 'disengaged';
 				}
 				setEmotion(dominantEmotion);
+
+				// Track mood during conversation (every 10 seconds)
+				if (currentConversationId && now % 10000 < 1000) {
+					moodHistoryRef.current.push({ emotion: dominantEmotion, timestamp: now });
+					// Keep only last 30 minutes of history
+					moodHistoryRef.current = moodHistoryRef.current.filter(m => now - m.timestamp < 1800000);
+				}
+
+				// Mental health monitoring - check every second
+				if (now - lastMentalCheckRef.current >= 1000) {
+					lastMentalCheckRef.current = now;
+
+					// Fatigue tracking: trigger after 5 min (300 seconds)
+					if (state.fatigue > 0.7) {
+						fatigueDurationRef.current += 1;
+						if (fatigueDurationRef.current >= 300) {
+							setMentalAlert({
+								type: 'fatigue',
+								message: '😴 You look tired. Take a 5-min break?',
+							});
+							fatigueDurationRef.current = 0;
+						}
+					} else {
+						fatigueDurationRef.current = 0;
+					}
+
+					// Low engagement tracking: trigger after 3 min (180 seconds)
+					if (state.engagement < 0.3) {
+						engagementLowDurationRef.current += 1;
+						if (engagementLowDurationRef.current >= 180) {
+							setMentalAlert({
+								type: 'disengaged',
+								message: '🎯 You seem distracted. Need help focusing?',
+							});
+							engagementLowDurationRef.current = 0;
+						}
+					} else {
+						engagementLowDurationRef.current = 0;
+					}
+
+					// Eye strain tracking: low blink rate for 2 min (120 seconds)
+					const blinkRate = features.blink_rate || 0;
+					if (blinkRate < 5 && blinkRate > 0) {
+						eyeStrainDurationRef.current += 1;
+						if (eyeStrainDurationRef.current >= 120) {
+							setMentalAlert({
+								type: 'eye_strain',
+								message: '👁️ Low blink rate detected. Eye strain risk - blink more!',
+							});
+							eyeStrainDurationRef.current = 0;
+						}
+					} else {
+						eyeStrainDurationRef.current = 0;
+					}
+
+					// Active session tracking: trigger after 45 min (2700 seconds)
+					if (activeSessionRef.current >= 2700) {
+						setMentalAlert({
+							type: 'break',
+							message: '⏰ You\'ve been active for 45 min. Take a stretch break?',
+						});
+						activeSessionRef.current = 0;
+					}
+
+					// Proactive voice prompts - in voice mode, give suggestions faster
+					if (voiceModeEnabled && cameraEnabled) {
+						// Stress in voice mode: after 30 seconds suggest breathing
+						if (state.stress > 0.6) {
+							if (!mentalAlert || mentalAlert.type !== 'voice_stress') {
+								setMentalAlert({
+									type: 'voice_stress',
+									message: '😰 You seem like you\'ve been through a lot. Take a deep breath...',
+								});
+							}
+						}
+						// Fatigue in voice mode: after 60 seconds suggest break
+						if (state.fatigue > 0.7) {
+							if (!mentalAlert || mentalAlert.type !== 'voice_fatigue') {
+								setMentalAlert({
+									type: 'voice_fatigue',
+									message: '😴 You look tired. Maybe take a short break?',
+								});
+							}
+						}
+					}
+
+					// Browser notifications for important alerts (with permission)
+					if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
+						// Send notification for long sessions (every 30 min)
+						if (activeSessionRef.current > 0 && activeSessionRef.current % 1800 === 0 && activeSessionRef.current <= 3600) {
+							new Notification('Aira - Time Check', {
+								body: 'You\'ve been active for a while. Take a break?',
+								icon: '/favicon.ico',
+							});
+						}
+					}
+				}
 			} catch (error) {
 				console.error('Error sending camera features:', error);
 			}
@@ -673,27 +903,59 @@ function App() {
 						{darkMode ? '☀️ Light' : '🌙 Dark'}
 					</button>
 					{cameraEnabled && (
-						<button
-							onClick={toggleVoiceMode}
-							className="btn btn-sm d-flex align-items-center gap-2"
-							style={{
-								background: voiceModeEnabled
-									? darkMode ? 'rgba(255, 193, 7, 0.2)' : 'rgba(255, 193, 7, 0.1)'
-									: darkMode ? 'rgba(74, 95, 127, 0.2)' : 'rgba(74, 95, 127, 0.1)',
-								color: voiceModeEnabled ? '#ffc107' : darkMode ? '#A8B5C4' : '#4A5F7F',
-								border: `1px solid ${voiceModeEnabled ? '#ffc107' : darkMode ? 'rgba(74, 95, 127, 0.3)' : 'rgba(74, 95, 127, 0.15)'}`,
-								borderRadius: '20px',
-								padding: '6px 12px',
-								fontSize: '0.85rem',
-							}}
-						>
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-								<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
-								<path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-								<line x1="12" y1="19" x2="12" y2="22"></line>
-							</svg>
-							{voiceModeEnabled ? 'Live On' : 'Live Off'}
-						</button>
+						<>
+							<button
+								onClick={() => {
+									if (!notificationsEnabled && 'Notification' in window) {
+										Notification.requestPermission().then((permission) => {
+											if (permission === 'granted') {
+												setNotificationsEnabled(true);
+											}
+										});
+									} else {
+										setNotificationsEnabled(!notificationsEnabled);
+									}
+								}}
+								className="btn btn-sm d-flex align-items-center gap-2"
+								style={{
+									background: notificationsEnabled
+										? darkMode ? 'rgba(40, 167, 69, 0.2)' : 'rgba(40, 167, 69, 0.1)'
+										: darkMode ? 'rgba(74, 95, 127, 0.2)' : 'rgba(74, 95, 127, 0.1)',
+									color: notificationsEnabled ? '#28a745' : darkMode ? '#A8B5C4' : '#4A5F7F',
+									border: `1px solid ${notificationsEnabled ? '#28a745' : darkMode ? 'rgba(74, 95, 127, 0.3)' : 'rgba(74, 95, 127, 0.15)'}`,
+									borderRadius: '20px',
+									padding: '6px 12px',
+									fontSize: '0.85rem',
+								}}
+							>
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+									<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path>
+									<path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path>
+								</svg>
+								{notificationsEnabled ? '🔔 On' : '🔕 Off'}
+							</button>
+							<button
+								onClick={disableCamera}
+								className="btn btn-sm d-flex align-items-center gap-2"
+								style={{
+									background: cameraEnabled
+										? darkMode ? 'rgba(220, 53, 69, 0.2)' : 'rgba(220, 53, 69, 0.1)'
+										: darkMode ? 'rgba(74, 95, 127, 0.2)' : 'rgba(74, 95, 127, 0.1)',
+									color: cameraEnabled ? '#dc3545' : darkMode ? '#A8B5C4' : '#4A5F7F',
+									border: `1px solid ${cameraEnabled ? '#dc3545' : darkMode ? 'rgba(74, 95, 127, 0.3)' : 'rgba(74, 95, 127, 0.15)'}`,
+									borderRadius: '20px',
+									padding: '6px 12px',
+									fontSize: '0.85rem',
+								}}
+								title="Disable camera completely"
+							>
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+									<path d="M1 1l22 22"></path>
+									<path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34m-7.72-2.06a4 4 0 1 1-5.56-5.56"></path>
+								</svg>
+								{cameraEnabled ? '📷 On' : '📷 Off'}
+							</button>
+						</>
 					)}
 				</div>
 				<Chat
@@ -725,9 +987,188 @@ function App() {
 				darkMode={darkMode}
 			/>
 
+			{/* Mental Health Alert */}
+			{mentalAlert && (
+				<div
+					className="position-fixed d-flex align-items-center justify-content-between p-3"
+					style={{
+						top: '80px',
+						right: '20px',
+						maxWidth: '320px',
+						background: darkMode ? 'rgba(255, 193, 7, 0.95)' : '#fff',
+						borderRadius: '12px',
+						boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+						zIndex: 1005,
+						border: `1px solid ${darkMode ? 'rgba(255, 193, 7, 0.3)' : '#ffc107'}`,
+					}}
+				>
+					<div className="me-2">
+						<p className="mb-0" style={{ color: darkMode ? '#1a1d23' : '#2C3A4F', fontSize: '0.9rem', fontWeight: 500 }}>
+							{mentalAlert.message}
+						</p>
+					</div>
+					<button
+						onClick={() => setMentalAlert(null)}
+						className="btn btn-sm d-flex align-items-center justify-content-center"
+						style={{
+							background: 'transparent',
+							border: 'none',
+							color: darkMode ? '#1a1d23' : '#6B7B94',
+							padding: '4px',
+							minWidth: 'auto',
+						}}
+					>
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+							<line x1="18" y1="6" x2="6" y2="18"></line>
+							<line x1="6" y1="6" x2="18" y2="18"></line>
+						</svg>
+					</button>
+				</div>
+			)}
+
+			{/* Conversation Summary */}
+			{conversationSummary && (
+				<div
+					className="position-fixed d-flex align-items-center justify-content-between p-3"
+					style={{
+						top: '80px',
+						left: '50%',
+						transform: 'translateX(-50%)',
+						maxWidth: '400px',
+						background: darkMode ? 'rgba(40, 167, 69, 0.95)' : '#fff',
+						borderRadius: '12px',
+						boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+						zIndex: 1005,
+						border: `1px solid ${darkMode ? 'rgba(40, 167, 69, 0.3)' : '#28a745'}`,
+					}}
+				>
+					<div className="me-2">
+						<p className="mb-1" style={{ color: darkMode ? '#1a1d23' : '#2C3A4F', fontSize: '0.85rem', fontWeight: 600 }}>
+							💬 Chat Summary
+						</p>
+						<p className="mb-0" style={{ color: darkMode ? '#1a1d23' : '#2C3A4F', fontSize: '0.9rem' }}>
+							{conversationSummary.message}
+						</p>
+					</div>
+					<button
+						onClick={() => setConversationSummary(null)}
+						className="btn btn-sm d-flex align-items-center justify-content-center"
+						style={{
+							background: 'transparent',
+							border: 'none',
+							color: darkMode ? '#1a1d23' : '#6B7B94',
+							padding: '4px',
+							minWidth: 'auto',
+						}}
+					>
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+							<line x1="18" y1="6" x2="6" y2="18"></line>
+							<line x1="6" y1="6" x2="18" y2="18"></line>
+						</svg>
+					</button>
+				</div>
+			)}
+
+			{/* Mental State Widget Toggle Button - moved to bottom left */}
+			{cameraEnabled && (
+				<button
+					onClick={() => setShowMoodWidget(!showMoodWidget)}
+					className="position-fixed d-flex align-items-center justify-content-center"
+					style={{
+						bottom: '100px',
+						left: '20px',
+						width: '44px',
+						height: '44px',
+						borderRadius: '50%',
+						background: darkMode ? 'rgba(74, 95, 127, 0.9)' : '#4A5F7F',
+						border: 'none',
+						boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
+						zIndex: 1004,
+						color: 'white',
+					}}
+					title="Mental State"
+				>
+					{emotion === 'happy' ? '😊' : emotion === 'focused' ? '🎯' : emotion === 'fatigued' ? '😴' : emotion === 'stressed' ? '😰' : emotion === 'disengaged' ? '😶' : '😐'}
+				</button>
+			)}
+
+			{/* Mental State Widget Panel - moved to bottom left */}
+			{showMoodWidget && cameraEnabled && _emotionalState && (
+				<div
+					className="position-fixed p-3"
+					style={{
+						bottom: '160px',
+						left: '20px',
+						width: '220px',
+						background: darkMode ? '#2A2D35' : '#FFFFFF',
+						borderRadius: '12px',
+						boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+						zIndex: 1004,
+						border: `1px solid ${darkMode ? '#3A3D45' : '#E8EAED'}`,
+					}}
+				>
+					<div className="d-flex justify-content-between align-items-center mb-3">
+						<h6 className="mb-0" style={{ color: darkMode ? '#F5F3F0' : '#2C3A4F' }}>Mental State</h6>
+						<button
+							onClick={() => setShowMoodWidget(false)}
+							style={{ background: 'transparent', border: 'none', color: darkMode ? '#7A8BA3' : '#6B7B94', cursor: 'pointer' }}
+						>
+							✕
+						</button>
+					</div>
+					<div className="d-flex flex-column gap-2">
+						<div>
+							<div className="d-flex justify-content-between mb-1">
+								<span style={{ fontSize: '0.8rem', color: darkMode ? '#A8B5C4' : '#6B7B94' }}>Fatigue</span>
+								<span style={{ fontSize: '0.8rem', color: darkMode ? '#F5F3F0' : '#2C3A4F' }}>{Math.round(_emotionalState.fatigue * 100)}%</span>
+							</div>
+							<div className="progress" style={{ height: '6px', background: darkMode ? '#1a1d23' : '#E8EAED' }}>
+								<div className="progress-bar" style={{ width: `${_emotionalState.fatigue * 100}%`, background: _emotionalState.fatigue > 0.7 ? '#dc3545' : '#4A5F7F' }} />
+							</div>
+						</div>
+						<div>
+							<div className="d-flex justify-content-between mb-1">
+								<span style={{ fontSize: '0.8rem', color: darkMode ? '#A8B5C4' : '#6B7B94' }}>Engagement</span>
+								<span style={{ fontSize: '0.8rem', color: darkMode ? '#F5F3F0' : '#2C3A4F' }}>{Math.round(_emotionalState.engagement * 100)}%</span>
+							</div>
+							<div className="progress" style={{ height: '6px', background: darkMode ? '#1a1d23' : '#E8EAED' }}>
+								<div className="progress-bar" style={{ width: `${_emotionalState.engagement * 100}%`, background: _emotionalState.engagement > 0.7 ? '#28a745' : _emotionalState.engagement < 0.3 ? '#dc3545' : '#ffc107' }} />
+							</div>
+						</div>
+						<div>
+							<div className="d-flex justify-content-between mb-1">
+								<span style={{ fontSize: '0.8rem', color: darkMode ? '#A8B5C4' : '#6B7B94' }}>Stress</span>
+								<span style={{ fontSize: '0.8rem', color: darkMode ? '#F5F3F0' : '#2C3A4F' }}>{Math.round(_emotionalState.stress * 100)}%</span>
+							</div>
+							<div className="progress" style={{ height: '6px', background: darkMode ? '#1a1d23' : '#E8EAED' }}>
+								<div className="progress-bar" style={{ width: `${_emotionalState.stress * 100}%`, background: _emotionalState.stress > 0.6 ? '#dc3545' : '#4A5F7F' }} />
+							</div>
+						</div>
+						<div>
+							<div className="d-flex justify-content-between mb-1">
+								<span style={{ fontSize: '0.8rem', color: darkMode ? '#A8B5C4' : '#6B7B94' }}>Positivity</span>
+								<span style={{ fontSize: '0.8rem', color: darkMode ? '#F5F3F0' : '#2C3A4F' }}>{Math.round(_emotionalState.positive_affect * 100)}%</span>
+							</div>
+							<div className="progress" style={{ height: '6px', background: darkMode ? '#1a1d23' : '#E8EAED' }}>
+								<div className="progress-bar" style={{ width: `${_emotionalState.positive_affect * 100}%`, background: _emotionalState.positive_affect > 0.6 ? '#28a745' : '#4A5F7F' }} />
+							</div>
+						</div>
+						<div className="mt-2 pt-2" style={{ borderTop: `1px solid ${darkMode ? '#3A3D45' : '#E8EAED'}` }}>
+							<div className="d-flex justify-content-between">
+								<span style={{ fontSize: '0.8rem', color: darkMode ? '#A8B5C4' : '#6B7B94' }}>Mood</span>
+								<span style={{ fontSize: '0.85rem', fontWeight: 500, color: darkMode ? '#F5F3F0' : '#2C3A4F' }}>
+									{emotion === 'happy' ? '😊 Happy' : emotion === 'focused' ? '🎯 Focused' : emotion === 'fatigued' ? '😴 Fatigued' : emotion === 'stressed' ? '😰 Stressed' : emotion === 'disengaged' ? '😶 Disengaged' : '😐 Neutral'}
+								</span>
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
+
 			{cameraEnabled && (
 				<>
-					{displayMode === 'eyes' ? (
+					{/* Show EyeVisualization when in eyes mode AND UI is visible */}
+					{displayMode === 'eyes' && cameraUIVisible && (
 						<EyeVisualization
 							emotion={emotion}
 							darkMode={darkMode}
@@ -739,7 +1180,10 @@ function App() {
 							onVoiceStart={startVoiceRecording}
 							onVoiceStop={stopVoiceRecording}
 						/>
-					) : (
+					)}
+
+					{/* Show CameraSensor when in camera mode AND UI is visible */}
+					{displayMode === 'camera' && cameraUIVisible && (
 						<CameraSensor
 							darkMode={darkMode}
 							onClose={closeCamera}
@@ -750,8 +1194,25 @@ function App() {
 							onVoiceStart={startVoiceRecording}
 							onVoiceStop={stopVoiceRecording}
 							onFeaturesUpdate={handleCameraFeatures}
+							isFullscreen={isCameraFullscreen}
+							showUI={true}
 						/>
 					)}
+
+					{/* Background monitor - ALWAYS runs when camera is enabled, even when UI is hidden */}
+					<CameraSensor
+						darkMode={darkMode}
+						onClose={closeCamera}
+						onToggleDisplayMode={() => setDisplayMode('camera')}
+						isSpeaking={isSpeaking}
+						isRecording={isRecording}
+						isProcessing={loading}
+						onVoiceStart={startVoiceRecording}
+						onVoiceStop={stopVoiceRecording}
+						onFeaturesUpdate={handleCameraFeatures}
+						isFullscreen={false}
+						showUI={false}
+					/>
 				</>
 			)}
 		</div>
